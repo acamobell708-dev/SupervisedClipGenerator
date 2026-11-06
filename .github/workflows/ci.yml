@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Set up Python for syntax checks
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check source syntax
+        run: npm run check:syntax
+
+      # Tests use local fixtures/fakes; speech models, media tools and API keys
+      # are not required to run the complete automated suite.
+      - name: Run all tests
+        run: npm test
+
+      - name: Build React client
+        run: npm run build

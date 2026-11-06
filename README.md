@@ -55,6 +55,8 @@ Local transcription uses **faster-whisper, Whisper model weights, CTranslate2, P
 
 ## Development
 
-`npm run check` runs offline tests and builds the client. Source lives in `src/client`, `src/domain` and `src/services`; Python/setup helpers are in `scripts`.
+`npm run check` checks JavaScript/JSX, CSS, Python and JSON syntax, runs all offline tests, and builds the client. Python must be on PATH for syntax checks; `SYNTAX_PYTHON` can override its executable. Source lives in `src/client`, `src/domain` and `src/services`; Python/setup helpers are in `scripts`.
+
+[GitHub Actions CI](.github/workflows/ci.yml) runs syntax checks, the complete test suite and the build on pushes, pull requests and manual runs, using Windows/Ubuntu with Node.js 22/24 and Python 3.12. CI uses `npm ci` and requires no API keys or speech-model downloads.
 
 See [architecture](docs/ARCHITECTURE.md), [requirements and roadmap](docs/FUNCTIONAL_REQUIREMENTS.md), and [prior-dashboard integration notes](docs/CHANNEL_DASHBOARD_KNOWLEDGE.md).
