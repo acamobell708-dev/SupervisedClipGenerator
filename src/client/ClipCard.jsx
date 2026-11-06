@@ -1,28 +1,31 @@
 import React from 'react';
-import { formatTime } from './formatters.js';
+import { formatTime, formatCount } from './formatters.js';
 
-export function ClipCard({clip, selected, approved, onPreview, onApprove}) {
+export function ClipCard({clip, selected, approved, onPreview, onApprove, onDownload, downloadDisabled}) {
+  const isComment = clip.sourceKind === 'timestamp-comment';
+  const range = `${formatTime(clip.startSeconds)} to ${formatTime(clip.endSeconds)}`;
   return (
-    <article className={`clip-card ${selected ? 'clip-card--active' : ''}`}>
-      <div className="clip-rank"><span className="rank-badge">{String(clip.rank).padStart(2,'0')}</span><div className="rank-label">REPLAY PEAK</div></div>
+    <article className={`clip-card ${isComment ? 'clip-card--comment' : ''} ${selected ? 'clip-card--active' : ''}`}>
+      <button className="clip-select" type="button" aria-label={`Preview ${isComment ? 'timestamp comment' : 'replay'} clip from ${range}${isComment ? `: ${clip.comment.excerpt}` : ''}`} aria-pressed={selected} onClick={() => onPreview(clip)}/>
+      <div className="clip-rank" aria-hidden="true"><span className="rank-badge">{isComment ? '“' : String(clip.rank).padStart(2,'0')}</span></div>
       <div className="clip-main">
         <div className="clip-heading">
           <h3>{formatTime(clip.startSeconds)} <span className="arrow">→</span> {formatTime(clip.endSeconds)}</h3>
-          <span className="length-pill">{Math.round(clip.durationSeconds)} sec</span>
+          {selected && <span className="preview-indicator">▶ In preview</span>}<span className="length-pill">{Math.round(clip.durationSeconds)} sec</span>
         </div>
-        <div className="intensity-row">
+        {isComment ? <p className="clip-comment-excerpt">“{clip.comment.excerpt}”</p> : <div className="intensity-row">
           <div className="intensity-track" role="img" aria-label={`Relative replay intensity ${clip.replayIntensityPercent} percent`}>
             <div className="intensity-bar" style={{width:`${clip.replayIntensityPercent}%`}} />
           </div>
           <strong>{clip.replayIntensityPercent}%</strong>
-        </div>
-        <div className="clip-subtitle">Relative replay intensity · not view count</div>
+        </div>}
+        <div className="clip-subtitle">{isComment ? `Comment at ${formatTime(clip.startSeconds)} · ♥ ${formatCount(clip.comment.likes)} · ${clip.comment.author}` : 'Relative replay intensity · not view count'}</div>
         <div className="clip-actions">
-          <button className={`mini-button ${selected ? 'mini-button--selected' : ''}`} type="button" onClick={() => onPreview(clip)}>
-            <span aria-hidden="true">▶</span> {selected ? 'In preview' : 'Preview'}
-          </button>
-          <button className={`mini-button ${approved ? 'mini-button--approved' : ''}`} type="button" aria-pressed={approved} onClick={() => onApprove(clip.id)}>
+          <button className={`approval-button ${approved ? 'approval-button--approved' : ''}`} type="button" aria-pressed={approved} onClick={() => onApprove(clip.id)}>
             {approved ? '✓ Approved' : '＋ Approve'}
+          </button>
+          <button className="clip-download-button" type="button" aria-label={`Download clip from ${range}`} title={`Download clip (${range})`} onClick={() => onDownload(clip)} disabled={downloadDisabled}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>
           </button>
           <a className="clip-link" href={clip.url} target="_blank" rel="noopener noreferrer">YouTube ↗</a>
         </div>

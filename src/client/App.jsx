@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ClipCard } from './ClipCard.jsx';
 import { PreviewPane } from './PreviewPane.jsx';
 import { formatTime, formatCount } from './formatters.js';
+import { getReviewClips, selectionManifest } from './reviewClips.js';
+import { fetchClipBlob, prepareApprovedDownload } from './batchDownloads.js';
 
 function Symbol({name}) {
   const shapes = {
@@ -13,23 +15,21 @@ function Symbol({name}) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{shapes[name]}</svg>;
 }
 
-function downloadJson(result, approved) {
-  const manifest = {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    video: result.video,
-    selectedClips: result.clips.filter(c => approved.has(c.id)),
-    note: 'Selection manifest contains time windows only. It does not download, edit, or upload video.',
-  };
-  const blob = new Blob([JSON.stringify(manifest, null, 2)], {type:'application/json'});
+function saveDownload(blob, filename) {
   const objectUrl = URL.createObjectURL(blob);
   const element = document.createElement('a');
   element.href = objectUrl;
-  element.download = `supervisedclipgenerator-${result.video.id}-selections.json`;
+  element.download = filename;
   document.body.appendChild(element);
   element.click();
   element.remove();
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+function downloadJson(result, approved) {
+  const manifest = selectionManifest(result, approved);
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], {type:'application/json'});
+  saveDownload(blob, `supervisedclipgenerator-${result.video.id}-selections.json`);
 }
 
 export function App() {
@@ -39,11 +39,58 @@ export function App() {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
   const [approved, setApproved] = useState(new Set());
+  const [download, setDownload] = useState({busy: false, message: '', error: false});
+  const downloadController = useRef(null);
+  useEffect(() => () => downloadController.current?.abort(), []);
+
+  async function downloadClip(clip) {
+    if (!result || !clip || result.status === 'demo' || loading || downloadController.current) return;
+    setSelected(clip);
+    const selection = {videoId: result.video.id, startSeconds: clip.startSeconds, endSeconds: clip.endSeconds};
+    const range = `${formatTime(selection.startSeconds)}–${formatTime(selection.endSeconds)}`;
+    const controller = new AbortController();
+    downloadController.current = controller;
+    setDownload({busy: true, message: `Preparing ${range} as MP4…`, error: false});
+    try {
+      const blob = await fetchClipBlob(selection.videoId, clip, controller.signal);
+      saveDownload(blob, `test-clip-${selection.videoId}-${selection.startSeconds}-${selection.endSeconds}.mp4`);
+      setDownload({busy: false, message: `${range} is ready. Check your browser downloads.`, error: false});
+    } catch (err) {
+      const cancelled = err.name === 'AbortError';
+      setDownload({busy: false, message: cancelled ? 'Download cancelled.' : err.message, error: !cancelled});
+    } finally {
+      downloadController.current = null;
+    }
+  }
+
+  async function downloadApproved() {
+    if (!result || !approved.size || result.status === 'demo' || loading || downloadController.current) return;
+    const controller = new AbortController();
+    downloadController.current = controller;
+    const batchApprovals = new Set(approved);
+    const count = getReviewClips(result).filter(clip => batchApprovals.has(clip.id)).length;
+    setDownload({busy: true, mode: 'batch', message: `Preparing ${count} approved clips…`, error: false});
+    try {
+      const archive = await prepareApprovedDownload({result, approved: batchApprovals, signal: controller.signal,
+        onProgress: ({index, total, clip, packing}) => setDownload({busy: true, mode: 'batch', error: false,
+          message: packing ? 'Packing approved clips into a ZIP…' : `Preparing clip ${index} of ${total}: ${formatTime(clip.startSeconds)}–${formatTime(clip.endSeconds)}…`,
+        }),
+      });
+      saveDownload(archive, `approved-clips-${result.video.id}.zip`);
+      setDownload({busy: false, message: `${count} approved clips are ready in one ZIP. Check your browser downloads.`, error: false});
+    } catch (err) {
+      const cancelled = err.name === 'AbortError';
+      setDownload({busy: false, message: cancelled ? 'Batch download cancelled.' : `Batch download stopped: ${err.message}`, error: !cancelled});
+    } finally {
+      downloadController.current = null;
+    }
+  }
 
   async function request(endpoint, body) {
-    if (loading) return;
+    if (loading || downloadController.current) return;
     setLoading(true);
     setError('');
+    setDownload({busy: false, message: '', error: false});
     try {
       const response = await fetch(endpoint, {
         method: body ? 'POST' : 'GET',
@@ -54,7 +101,7 @@ export function App() {
       if (!response.ok) throw new Error(data.error || 'Unable to analyse video.');
       setResult(data);
       setApproved(new Set());
-      setSelected(data.clips[0] || null);
+      setSelected(getReviewClips(data)[0] || null);
     } catch (err) {
       setError(err.message || 'Unable to analyse video.');
     } finally { setLoading(false); }
@@ -69,8 +116,10 @@ export function App() {
     });
   }
 
-  const comments = result?.timestampComments || [];
+  const reviewClips = getReviewClips(result);
+  const commentClips = reviewClips.filter(clip => clip.sourceKind === 'timestamp-comment');
   const clips = result?.clips || [];
+  const renderClip = clip => <ClipCard key={clip.id} clip={clip} selected={selected?.id === clip.id} approved={approved.has(clip.id)} onPreview={setSelected} onApprove={toggleApproved} onDownload={downloadClip} downloadDisabled={loading || download.busy || result.status === 'demo'}/>;
   return <div className="app-shell">
     <header className="topbar">
       <div className="topbar-inner">
@@ -84,19 +133,18 @@ export function App() {
 
     <main className="main-container">
       <section className="hero">
-        <div className="eyebrow"><span className="eyebrow-icon">✦</span> FIND THE SIGNAL. CUT THE NOISE.</div>
-        <h1>Every video has a <span>moment.</span><br/>Find the ones that matter.</h1>
-        <p className="hero-description">Paste any public YouTube video URL. Discover up to five high-replay moments, explore timestamped viewer reactions, and start building your clip shortlist.</p>
+        <div className="hero-heading"><h1>Find your next <span>clip.</span></h1><p>Discover, preview and approve replay peaks.</p></div>
         <form className="search-form" onSubmit={event => {event.preventDefault(); request('/api/analyse', {url});}}>
           <div className="search-field"><span className="link-symbol">↗</span><input autoFocus type="url" placeholder="https://www.youtube.com/watch?v=..." value={url} onChange={e => setUrl(e.target.value)} aria-label="YouTube video URL" required /></div>
-          <button className="primary-button" type="submit" disabled={loading || !url.trim()}>{loading ? <><span className="spinner"/> Analysing…</> : <>Discover moments <span aria-hidden="true">→</span></>}</button>
+          <button className="primary-button" type="submit" disabled={loading || download.busy || !url.trim()}>{loading ? <><span className="spinner"/> Analysing…</> : <>Discover moments <span aria-hidden="true">→</span></>}</button>
         </form>
-        <div className="search-bottom"><span><span className="small-check">✓</span> Any public creator</span><span><span className="small-check">✓</span> No OpenAI tokens</span><span><span className="small-check">✓</span> Local processing</span><button className="demo-link" type="button" onClick={() => request('/api/demo')} disabled={loading}>Try offline demo ↗</button></div>
+        <div className="search-bottom"><span>Public YouTube videos · Local workspace · No AI tokens</span><button className="demo-link" type="button" onClick={() => request('/api/demo')} disabled={loading || download.busy}>Try offline demo ↗</button></div>
+        {loading && <div className="analysis-progress" role="status"><progress aria-label="Analysing video"/><span>Reading public replay data and sampled comments…</span></div>}
         {error && <div className="error-banner" role="alert"><b>Couldn't analyse that video.</b> {error} <span>See the README for yt-dlp setup and troubleshooting.</span></div>}
       </section>
 
       {!result ? <section className="empty-stage">
-        <div className="section-intro"><div className="overline">THE WORKFLOW</div><h2>From link to shortlist</h2><p>A focused first step toward automated clipping, with clear evidence for every suggestion.</p></div>
+        <div className="section-intro"><h2>From link to shortlist</h2></div>
         <div className="features-grid">
           <div className="feature-card"><div className="feature-icon blue"><Symbol name="film"/></div><span className="feature-index">01 / INPUT</span><h3>Paste a video</h3><p>Public YouTube links, Shorts links and youtu.be URLs are accepted.</p></div>
           <div className="feature-card"><div className="feature-icon purple"><Symbol name="trend"/></div><span className="feature-index">02 / DISCOVERY</span><h3>Find replay peaks</h3><p>Rank distinct 10-second windows from public Most Replayed heatmap data, when available.</p></div>
@@ -105,23 +153,30 @@ export function App() {
         <div className="note-row"><span>ⓘ</span> YouTube only offers a public Most Replayed graph for eligible videos. Missing heatmaps are reported as unavailable—not estimated.</div>
       </section> : <>
         <section className="results-heading">
-          <div><div className="overline">{result.status === 'demo' ? 'SYNTHETIC DEMO · NOT LIVE DATA' : 'ANALYSIS COMPLETE'}</div><h2>Moments discovered <span className="small-number">{clips.length} / 5</span></h2><p>Evidence-backed suggestions from the public replay signal and a bounded comment sample.</p></div>
-          <div className="results-tools"><span className="status-pill"><span className="server-dot" /> {result.status === 'demo' ? 'Demo data' : 'Public signals'}</span><button className="outline-button" onClick={() => downloadJson(result, approved)} disabled={approved.size === 0}>Export approved ({approved.size}) ↓</button></div>
+          <div><div className="overline">{result.status === 'demo' ? 'SYNTHETIC DEMO · NOT LIVE DATA' : 'ANALYSIS COMPLETE'}</div><h2>Clip shortlist <span className="small-number">{reviewClips.length} clips</span></h2></div>
+          <div className="results-tools"><button className="outline-button" onClick={() => downloadJson(result, approved)} disabled={approved.size === 0}>Export timestamps ({approved.size}) ↓</button><span className="export-note">JSON only · Approvals are temporary</span></div>
         </section>
         <section className="video-summary"><img src={result.video.thumbnail} alt="Video thumbnail"/><div className="video-summary-body"><div className="meta-label">SOURCE VIDEO</div><h3>{result.video.title}</h3><div className="video-meta"><span>{result.video.channel}</span><span className="meta-bullet">•</span><span>{formatTime(result.video.durationSeconds)}</span><span className="meta-bullet">•</span><span>{formatCount(result.video.viewCount)} views</span></div></div><a target="_blank" rel="noopener noreferrer" href={result.video.url} className="video-open">Open video ↗</a></section>
         {result.warnings?.length > 0 && <div className="warning-area" role="status">{result.warnings.map((w,i)=><p key={i}><span>ⓘ</span> {w}</p>)}</div>}
         <div className="workspace-grid">
-          <section className="moments-pane"><div className="panel-head"><div><div className="overline">RANKED MOMENTS</div><h2><Symbol name="trend"/> Top replay peaks</h2></div><span className="count-tag">{clips.length} clips</span></div>
-            {clips.length ? <div className="clip-list">{clips.map(clip => <ClipCard key={clip.id} clip={clip} selected={selected?.id === clip.id} approved={approved.has(clip.id)} onPreview={setSelected} onApprove={toggleApproved}/>)}</div> : <div className="no-results"><h3>Replay heatmap unavailable</h3><p>This video does not currently expose replay peaks to public viewers. Try a popular long-form video with a visible Most Replayed graph.</p></div>}
+          <section className="moments-pane"><div className="panel-head"><h2><Symbol name="trend"/> Top replay peaks</h2><span className="count-tag">{clips.length} / 5</span></div>
+            <p className="clip-list-hint">Select any card to preview its clip.</p>
+            <div className="clip-list">{clips.length ? reviewClips.filter(clip => clip.sourceKind === 'replay').map(renderClip) : <div className="no-results"><h3>Replay heatmap unavailable</h3><p>This video does not currently expose replay peaks to public viewers. Try a popular long-form video with a visible Most Replayed graph.</p></div>}
+              <div className="panel-head comment-list-heading"><h2><Symbol name="quote"/> Timestamped comments</h2><span className="count-tag">{commentClips.length} / 3</span></div>
+              {commentClips.length ? commentClips.map(renderClip) : <div className="no-results no-results--small">No timestamped comments in the sampled public comments.</div>}
+            </div>
+            <p className="comment-disclaimer">Ranked by likes among {result.sources.sampledCommentCount} sampled comments, not all comments. Source: {result.sources.comments.replaceAll('-', ' ')}.</p>
           </section>
-          <aside className="right-rail"><section className="preview-pane"><div className="panel-head"><div><div className="overline">PLAYBACK</div><h2><Symbol name="film"/> Clip preview</h2></div><span className="live-label">YOUTUBE PLAYER</span></div><PreviewPane video={result.video} selected={selected}/><div className="player-footer">{selected ? <><div><strong>{formatTime(selected.startSeconds)} – {formatTime(selected.endSeconds)}</strong><p>Playback segment · {Math.round(selected.endSeconds-selected.startSeconds)} sec</p></div><a href={`https://www.youtube.com/watch?v=${result.video.id}&t=${Math.floor(selected.startSeconds)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a></> : <p>Choose a moment on the left.</p>}</div>{!result.video.embeddable && <p className="embed-alert">The creator may have disabled embedding. Use “Watch on YouTube” instead.</p>}</section>
-          <section className="comment-pane"><div className="panel-head"><div><div className="overline">AUDIENCE SIGNALS</div><h2><Symbol name="quote"/> Timestamped comments</h2></div><span className="count-tag">{comments.length} / 3</span></div>
-            {comments.length ? comments.map((comment,index)=><article className="comment-row" key={`${comment.id}-${comment.atSeconds}`}><div className="comment-top"><button className="timestamp-chip" title="Preview this timestamp" onClick={()=>setSelected({id:`comment-${index}`,startSeconds:comment.atSeconds,endSeconds:Math.min(result.video.durationSeconds,comment.atSeconds+10)})}>▶ {formatTime(comment.atSeconds)}</button><span>♥ {formatCount(comment.likes)} likes</span></div><p>“{comment.text}”</p><div className="comment-byline">— {comment.author} <a href={comment.url} target="_blank" rel="noopener noreferrer">Open ↗</a></div></article>) : <div className="no-results no-results--small">No timestamped comments in the sampled public comments.</div>}
-            <div className="comment-disclaimer">Ranked by likes among {result.sources.sampledCommentCount} sampled comments, not all comments. Source: {result.sources.comments.replaceAll('-', ' ')}.</div></section></aside>
+          <aside className="right-rail"><section className="preview-pane"><div className="panel-head"><h2><Symbol name="film"/> Clip preview</h2><span className="live-label">YOUTUBE PLAYER</span></div><PreviewPane video={result.video} selected={selected}/><div className="player-footer">{selected ? <><div><strong>{formatTime(selected.startSeconds)} – {formatTime(selected.endSeconds)}</strong><p>Playback segment · {Math.round(selected.endSeconds-selected.startSeconds)} sec</p></div><a href={`https://www.youtube.com/watch?v=${result.video.id}&t=${Math.floor(selected.startSeconds)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a></> : <p>Choose a moment on the left.</p>}</div>{!result.video.embeddable && <p className="embed-alert">The creator may have disabled embedding. Use “Watch on YouTube” instead.</p>}
+            <div className="test-download">
+              <div className="batch-download-actions"><button type="button" className="primary-button" onClick={downloadApproved} disabled={!approved.size || loading || download.busy || result.status === 'demo'}>{download.busy && download.mode === 'batch' ? <><span className="spinner"/> Preparing batch…</> : <>Batch upload (download ZIP) · {approved.size} approved ↓</>}</button><p>Current action: download all approved clips as one ZIP.</p></div>
+              {download.busy && <button type="button" className="demo-link download-cancel" onClick={() => downloadController.current?.abort()}>Cancel download</button>}
+              {download.message && <p className={download.error ? 'download-message download-message--error' : 'download-message'} role={download.error ? 'alert' : 'status'}>{download.message}</p>}
+            </div>
+          </section></aside>
         </div>
-        <div className="result-footer"><div><span>✦</span><strong>{approved.size} selected for future editing</strong><p>Approvals are temporary until exported. Batch upload, subtitles and effects are future milestones.</p></div><button className="outline-button" disabled={!approved.size} onClick={()=>downloadJson(result,approved)}>Export selection manifest ↓</button></div>
       </>}
     </main>
-    <footer className="footer"><span>CLIPFOUNDRY <span>·</span> LOCAL-FIRST CREATOR TOOLS</span><span>Discovery only · No media downloaded or uploaded · No AI tokens spent</span></footer>
+    <footer className="footer"><span>CLIPFOUNDRY <span>·</span> LOCAL-FIRST CREATOR TOOLS</span><span>Discovery & test clips · No uploads · No AI tokens spent</span></footer>
   </div>;
 }

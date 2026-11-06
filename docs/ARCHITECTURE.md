@@ -3,16 +3,20 @@
 ```text
 Browser (public/index.html + public/styles/app.css)
     ↳ public/assets/app.js (built from src/client/*.jsx)
-    ↳ POST /api/analyse   GET /api/demo
+    ↳ POST /api/analyse   GET /api/demo   POST /api/clips/download
 Express server (src/server.js → src/app.js)
     ↳ ClipDiscoveryService
          ↳ parseYouTubeVideoId (strict allowlist; canonical ID only)
-         ↳ YtDlpClient (spawn local yt-dlp, no shell, no media downloads)
+         ↳ YtDlpClient (spawn local yt-dlp, no shell, discovery does not download media)
          ↳ normaliseHeatmap / selectTopClips (pure deterministic ranking)
          ↳ YouTubeCommentsClient (optional official public commentThreads API)
            or yt-dlp comments fallback (bounded)
          ↳ extractTimestamps / selectTimestampComments (pure ranking)
     ↳ JSON response with video, clips, comments, provenance, warnings
+    ↳ ClipDownloadService (explicit test-download button only)
+         ↳ validate YouTube ID and finite range, maximum 15 seconds
+         ↳ yt-dlp --download-sections + FFmpeg, MP4 up to 720p
+         ↳ temporary MP4 attachment; delete job directory after transfer/failure
 ```
 
 ## Clip algorithm
@@ -24,6 +28,8 @@ Express server (src/server.js → src/app.js)
 5. Never infer counts from intensity. Missing heatmaps return an empty clip list plus a warning.
 
 ## Comments algorithm
+
+The client normalises replay and comment candidates with `getReviewClips`. Comment cards follow replay cards and retain their distinct evidence source, first-sentence excerpt and original comment metadata. Their windows start at the mentioned timestamp and end after 10 seconds or at the video end. Both sources share card selection, approvals, manifest export and the MP4 download route; if no replay clips exist, the first comment clip is selected automatically.
 
 - Use official `commentThreads.list(part=snippet, order=relevance, textFormat=plainText)` if `YOUTUBE_API_KEY` exists. Sample is bounded; no OAuth needed.
 - Otherwise attempt a bounded `yt-dlp --write-comments` call sorted by top comments; if it fails, still return replay results with a comment warning.
@@ -40,6 +46,10 @@ Express server (src/server.js → src/app.js)
 - **Storage**: saved projects and approval revisions.
 
 ## Security and operational constraints
+
+- The batch button snapshots approved replay/comment windows and calls the existing download route sequentially. The client packages the resulting MP4 blobs and a JSON manifest into one stored ZIP. It uses the same abort controller as individual downloads, prevents concurrent download actions in the UI, and saves the ZIP only after every approved clip succeeds. No upload API is called.
+
+- Test downloads use fixed argument arrays with local yt-dlp configuration ignored, an isolated temporary directory, one preparation at a time, a 180-second process timeout and a 50 MB response limit. Client disconnect/cancellation stops the process tree and cleans temporary files. FFmpeg can be configured with `FFMPEG_PATH`; missing tools produce actionable UI errors.
 
 - The server binds to `127.0.0.1`, and only YouTube video IDs validated in the domain module reach a subprocess/network URL.
 - External process is invoked with a fixed argument array, `shell:false`, 12 MB output limit and a configurable timeout.

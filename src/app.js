@@ -4,10 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { demoFixture } from './services/demoFixture.js';
 import { AppError } from './utils/AppError.js';
+import { validateClipDownload } from './services/clipDownloadService.js';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
 
-export function createApp({service, config}) {
+export function createApp({service, downloadService, config}) {
   const app = express();
   app.disable('x-powered-by');
   app.use('/api', rateLimit({windowMs: 60_000, limit: 15, standardHeaders:'draft-7', legacyHeaders:false}));
@@ -25,6 +26,27 @@ export function createApp({service, config}) {
       const result = await service.analyse(req.body.url);
       res.json(result);
     } catch(error) {next(error);}
+  });
+  app.post('/api/clips/download', async (req,res,next) => {
+    const controller = new AbortController();
+    const onClose = () => { if (!res.writableFinished) controller.abort(); };
+    res.once('close', onClose);
+    let clip;
+    try {
+      const selection = validateClipDownload(req.body);
+      if (!downloadService) throw new AppError('Test downloads are unavailable. Restart the app.', 503, 'DOWNLOAD_UNAVAILABLE');
+      clip = await downloadService.prepare(selection, {signal: controller.signal});
+      if (controller.signal.aborted) return;
+      res.set('Cache-Control', 'no-store');
+      await new Promise((resolve, reject) => {
+        res.download(clip.filePath, clip.filename, error => error ? reject(error) : resolve());
+      });
+    } catch (error) {
+      if (!res.headersSent && !res.destroyed) next(error);
+    } finally {
+      res.off('close', onClose);
+      if (clip) await clip.cleanup();
+    }
   });
   app.use(express.static(publicDir, {index:'index.html', fallthrough:true}));
   app.use('/api', (_req,res) => res.status(404).json({error:'API route not found.',code:'NOT_FOUND'}));
