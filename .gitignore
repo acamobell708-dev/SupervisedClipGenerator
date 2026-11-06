@@ -1,0 +1,7 @@
+node_modules/
+.env
+public/assets/*.js
+public/assets/*.js.map
+.DS_Store
+*.log
+coverage/

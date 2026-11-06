@@ -1,0 +1,23 @@
+{
+  "name": "supervisedclipgenerator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first YouTube Most Replayed clip discovery with timestamped public comments",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "start": "npm run build && node src/server.js",
+    "test": "node --test tests/*.test.js",
+    "check": "npm run test && npm run build"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": { "esbuild": "^0.25.8" }
+}
