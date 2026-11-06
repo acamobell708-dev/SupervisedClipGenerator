@@ -68,6 +68,30 @@ test('ZIP headers contain correct CRC-32 and preserve UTF-8 filenames', async ()
   assert.equal(entry.crc, 0xcbf43926); // Standard CRC-32 test vector.
 });
 
+test('batch applies local subtitles to every approved window and records the render option', async () => {
+  const cards = getReviewClips(result);
+  let calls = 0;
+  const archive = await prepareApprovedDownload({result, approved: new Set(cards.map(clip => clip.id)), subtitles: true,
+    fetchClip: async (_videoId, _clip, _signal, options) => {
+      assert.deepEqual(options, {subtitles: true});
+      calls++;
+      return new Blob(['captioned MP4']);
+    },
+  });
+  assert.equal(calls, 3);
+  const files = readStoredZip(await archive.arrayBuffer());
+  assert.equal(files.get('03-timestamp-comment-45-55-subtitled.mp4').text, 'captioned MP4');
+  assert.equal(JSON.parse(files.get('selections.json').text).renderOptions.subtitles, true);
+});
+
+test('individual subtitle request includes the option in the API body', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    assert.equal(JSON.parse(options.body).subtitles, true);
+    return new Response(new Blob(['captioned MP4']));
+  });
+  assert.ok((await fetchClipBlob(result.video.id, getReviewClips(result)[0], undefined, {subtitles: true})).size);
+});
+
 test('empty approval selection makes no download requests', async () => {
   await assert.rejects(prepareApprovedDownload({result, approved: new Set(), fetchClip: () => assert.fail('Unexpected download')}), /Approve at least one/);
 });

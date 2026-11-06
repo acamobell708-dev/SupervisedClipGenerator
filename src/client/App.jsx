@@ -39,6 +39,7 @@ export function App() {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
   const [approved, setApproved] = useState(new Set());
+  const [subtitles, setSubtitles] = useState(true);
   const [download, setDownload] = useState({busy: false, message: '', error: false});
   const downloadController = useRef(null);
   useEffect(() => () => downloadController.current?.abort(), []);
@@ -50,10 +51,10 @@ export function App() {
     const range = `${formatTime(selection.startSeconds)}–${formatTime(selection.endSeconds)}`;
     const controller = new AbortController();
     downloadController.current = controller;
-    setDownload({busy: true, message: `Preparing ${range} as MP4…`, error: false});
+    setDownload({busy: true, message: `Preparing ${range}${subtitles ? ' with local white subtitles' : ' as MP4'}…`, error: false});
     try {
-      const blob = await fetchClipBlob(selection.videoId, clip, controller.signal);
-      saveDownload(blob, `test-clip-${selection.videoId}-${selection.startSeconds}-${selection.endSeconds}.mp4`);
+      const blob = await fetchClipBlob(selection.videoId, clip, controller.signal, {subtitles});
+      saveDownload(blob, `test-clip-${selection.videoId}-${selection.startSeconds}-${selection.endSeconds}${subtitles ? '-subtitled' : ''}.mp4`);
       setDownload({busy: false, message: `${range} is ready. Check your browser downloads.`, error: false});
     } catch (err) {
       const cancelled = err.name === 'AbortError';
@@ -71,12 +72,12 @@ export function App() {
     const count = getReviewClips(result).filter(clip => batchApprovals.has(clip.id)).length;
     setDownload({busy: true, mode: 'batch', message: `Preparing ${count} approved clips…`, error: false});
     try {
-      const archive = await prepareApprovedDownload({result, approved: batchApprovals, signal: controller.signal,
+      const archive = await prepareApprovedDownload({result, approved: batchApprovals, signal: controller.signal, subtitles,
         onProgress: ({index, total, clip, packing}) => setDownload({busy: true, mode: 'batch', error: false,
-          message: packing ? 'Packing approved clips into a ZIP…' : `Preparing clip ${index} of ${total}: ${formatTime(clip.startSeconds)}–${formatTime(clip.endSeconds)}…`,
+          message: packing ? 'Packing approved clips into a ZIP…' : `Preparing clip ${index} of ${total}: ${formatTime(clip.startSeconds)}–${formatTime(clip.endSeconds)}${subtitles ? ' with local subtitles' : ''}…`,
         }),
       });
-      saveDownload(archive, `approved-clips-${result.video.id}.zip`);
+      saveDownload(archive, `approved-clips-${result.video.id}${subtitles ? '-subtitled' : ''}.zip`);
       setDownload({busy: false, message: `${count} approved clips are ready in one ZIP. Check your browser downloads.`, error: false});
     } catch (err) {
       const cancelled = err.name === 'AbortError';
@@ -138,7 +139,7 @@ export function App() {
           <div className="search-field"><span className="link-symbol">↗</span><input autoFocus type="url" placeholder="https://www.youtube.com/watch?v=..." value={url} onChange={e => setUrl(e.target.value)} aria-label="YouTube video URL" required /></div>
           <button className="primary-button" type="submit" disabled={loading || download.busy || !url.trim()}>{loading ? <><span className="spinner"/> Analysing…</> : <>Discover moments <span aria-hidden="true">→</span></>}</button>
         </form>
-        <div className="search-bottom"><span>Public YouTube videos · Local workspace · No AI tokens</span><button className="demo-link" type="button" onClick={() => request('/api/demo')} disabled={loading || download.busy}>Try offline demo ↗</button></div>
+        <div className="search-bottom"><span>Public YouTube videos · Local workspace · No API fees</span><button className="demo-link" type="button" onClick={() => request('/api/demo')} disabled={loading || download.busy}>Try offline demo ↗</button></div>
         {loading && <div className="analysis-progress" role="status"><progress aria-label="Analysing video"/><span>Reading public replay data and sampled comments…</span></div>}
         {error && <div className="error-banner" role="alert"><b>Couldn't analyse that video.</b> {error} <span>See the README for yt-dlp setup and troubleshooting.</span></div>}
       </section>
@@ -169,6 +170,8 @@ export function App() {
           </section>
           <aside className="right-rail"><section className="preview-pane"><div className="panel-head"><h2><Symbol name="film"/> Clip preview</h2><span className="live-label">YOUTUBE PLAYER</span></div><PreviewPane video={result.video} selected={selected}/><div className="player-footer">{selected ? <><div><strong>{formatTime(selected.startSeconds)} – {formatTime(selected.endSeconds)}</strong><p>Playback segment · {Math.round(selected.endSeconds-selected.startSeconds)} sec</p></div><a href={`https://www.youtube.com/watch?v=${result.video.id}&t=${Math.floor(selected.startSeconds)}s`} target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a></> : <p>Choose a moment on the left.</p>}</div>{!result.video.embeddable && <p className="embed-alert">The creator may have disabled embedding. Use “Watch on YouTube” instead.</p>}
             <div className="test-download">
+              <label className="subtitle-toggle"><input type="checkbox" checked={subtitles} disabled={download.busy} onChange={event => setSubtitles(event.target.checked)}/><span>Add white subtitles <small>Local speech recognition · Applies to individual and batch downloads</small></span></label>
+              <p className="subtitle-note">Subtitles are burned into downloaded videos. The YouTube preview shows the original.</p>
               <div className="batch-download-actions"><button type="button" className="primary-button" onClick={downloadApproved} disabled={!approved.size || loading || download.busy || result.status === 'demo'}>{download.busy && download.mode === 'batch' ? <><span className="spinner"/> Preparing batch…</> : <>Batch upload (download ZIP) · {approved.size} approved ↓</>}</button><p>Current action: download all approved clips as one ZIP.</p></div>
               {download.busy && <button type="button" className="demo-link download-cancel" onClick={() => downloadController.current?.abort()}>Cancel download</button>}
               {download.message && <p className={download.error ? 'download-message download-message--error' : 'download-message'} role={download.error ? 'alert' : 'status'}>{download.message}</p>}
@@ -177,6 +180,6 @@ export function App() {
         </div>
       </>}
     </main>
-    <footer className="footer"><span>CLIPFOUNDRY <span>·</span> LOCAL-FIRST CREATOR TOOLS</span><span>Discovery & test clips · No uploads · No AI tokens spent</span></footer>
+    <footer className="footer"><span>CLIPFOUNDRY <span>·</span> LOCAL-FIRST CREATOR TOOLS</span><span>Local subtitles & clips · No uploads · No paid AI APIs</span></footer>
   </div>;
 }

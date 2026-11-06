@@ -128,6 +128,10 @@ h1,h2,h3{font-family:'Space Grotesk','DM Sans',sans-serif}
 .player-footer a{font-size:11px;color:#b9b0fa;white-space:nowrap}
 .embed-alert{color:#e0b48a;font-size:12px;line-height:1.6;margin-top:8px}
 .test-download{margin-top:10px}
+.subtitle-toggle{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:700;cursor:pointer}
+.subtitle-toggle input{accent-color:#b5a8ff;width:16px;height:16px;margin:1px 0 0;flex-shrink:0}
+.subtitle-toggle small{display:block;font-size:10px;font-weight:400;color:#a3acc0;margin-top:3px;line-height:1.5}
+.subtitle-note{font-size:10px;color:#a3acc0;line-height:1.5;margin-top:6px}
 .download-cancel{margin-top:7px}
 .download-message{font-size:12px;line-height:1.5;color:#c8bfff;margin-top:7px;overflow-wrap:anywhere}
 .download-message--error{color:#ffbabb}

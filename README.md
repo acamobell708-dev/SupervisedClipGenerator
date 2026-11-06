@@ -2,9 +2,9 @@
 
 A local **React + HTML/CSS + Express/Node.js** starter application for finding promising short moments in *public YouTube videos, including videos from channels you do not own*.
 
-**Today:** paste a link → read the public **Most Replayed** heatmap via `yt-dlp` → rank up to **five non-overlapping 10-second segments** (within the planned 5–15-second range) → preview those YouTube segments → download the selected preview as a test MP4 or mark selections approved and export their timestamps as JSON. Also surfaces up to **three liked viewer comments mentioning valid timestamps**, from a bounded public comment sample. Media is downloaded only when you click **Download test clip**. Nothing is uploaded. No OpenAI requests or tokens are used.
+**Today:** paste a link → read the public **Most Replayed** heatmap via `yt-dlp` → rank up to **five non-overlapping 10-second segments** → preview and approve replay/comment clips → download individual MP4s or an approved-clip ZIP, optionally with locally generated bold white subtitles. Also surfaces up to **three liked viewer comments mentioning valid timestamps**, from a bounded public comment sample. Media is fetched only through download actions. Nothing is uploaded or sent to a cloud transcription service. No OpenAI requests or API tokens are used.
 
-**Later:** automatically choose a video, manual timestamp selection, richer clip review, batch rendering, large white captions, editing templates, face overlays, pitch ramp, border/effects, creator-authorised batch upload, and integration with the prior channel dashboard. Track these in [docs/FUNCTIONAL_REQUIREMENTS.md](docs/FUNCTIONAL_REQUIREMENTS.md).
+**Later:** automatically choose a video, manual timestamp selection, caption correction and rendered preview, editing templates, face overlays, pitch ramp, border/effects, creator-authorised batch upload, and integration with the prior channel dashboard. Track these in [docs/FUNCTIONAL_REQUIREMENTS.md](docs/FUNCTIONAL_REQUIREMENTS.md).
 
 ## Run on Windows (VS Code terminal / PowerShell)
 
@@ -42,7 +42,35 @@ The button requires **yt-dlp + FFmpeg** installed on the server machine. Get FFm
 
 Test downloads use the selected window's exact timestamps, MP4/M4A formats up to 720p, and FFmpeg re-encoding for more accurate cuts. Some sources may not offer these formats or allow extraction. The export is limited to 15 seconds and 50 MB, with one preparation at a time and a three-minute process timeout. Temporary files are removed after delivery, cancellation or failure. See the [official yt-dlp options](https://github.com/yt-dlp/yt-dlp#usage-and-options).
 
-Download buttons are disabled for the offline demo because its timestamps are synthetic. **Export timestamps** remains a separate JSON manifest export; it does not export media. Captions, effects and uploading are future milestones.
+Download buttons are disabled for the offline demo because its timestamps are synthetic. **Export timestamps** remains a separate JSON manifest export; it does not export media. Effects and uploading are future milestones.
+
+## Local white subtitles — one-time setup
+
+Requires Python (3.10–3.12 recommended) and FFmpeg with `ass`/libass and `libx264` support. No GPU, API key, subscription or transcription usage charge is required. From the project folder:
+
+```powershell
+npm run setup:subtitles
+```
+
+This creates `.venv-subtitles`, installs [faster-whisper](https://github.com/SYSTRAN/faster-whisper), downloads the multilingual `base` speech model into `.cache/whisper-models`, and verifies CPU/int8 loading. Setup needs internet and disk space for the dependencies/model; it does not change your global Python packages. It prefers an installed Python 3.12, 3.11 or 3.10 on Windows, avoiding reliance on the newest Python's wheel availability. If older pip reports a certificate error, setup attempts a secure pip upgrade using your default Python; certificate verification remains enabled.
+
+If Windows' model-listing API connection fails, setup retries via the official Hugging Face file resolver using Windows curl, pins one repository revision, and checks the model's SHA-256 checksum. No model mirror or insecure TLS mode is used.
+
+Restart the app after setup. **Add white subtitles** below the player is enabled by default and applies to the individual download icons and the approved-clip ZIP. Turn it off for original clips. The downloaded MP4s contain bold white phrase captions with a black outline, positioned inside the bottom safe area. The YouTube embed still previews the source without our captions. Transcription errors can occur, particularly with background music, overlapping voices or clipped words; review downloaded captions before publishing. A correction editor and rendered preview are not implemented yet.
+
+Transcription runs locally on CPU using word timestamps and voice activity detection. The first render takes longer; matching audio/model/language transcripts are reused from `.cache/transcripts`. Actual inference uses cached models in offline mode: no audio is sent to a speech API and models are not downloaded during a clip request. Temporary source and captioned videos are removed after the response; the speech model and transcript cache remain on your machine and are gitignored. You can delete `.cache/transcripts` to clear saved transcripts.
+
+Optional `.env` settings (restart after editing):
+
+```dotenv
+WHISPER_MODEL=base
+WHISPER_LANGUAGE=auto
+SUBTITLE_TIMEOUT_MS=300000
+# Only if using a different existing Python environment with faster-whisper:
+# SUBTITLE_PYTHON_PATH=C:\path\to\python.exe
+```
+
+Use `WHISPER_LANGUAGE=en` for English when automatic detection on a short clip is unreliable. `WHISPER_MODEL=small` can improve accuracy with more processing time and memory; `tiny` is faster. After changing models, rerun `npm run setup:subtitles` to download/verify that model. Subtitle processing has a separate five-minute timeout by default and supports **Cancel download**. Missing setup, missing speech or rendering errors appear in the UI; the app does not silently return an uncaptioned clip when captions were requested.
 
 ## Batch download approved clips
 
@@ -70,7 +98,7 @@ docs/                  Requirements, prior-dashboard handover, architecture
 ## API / tests
 
 - `POST /api/analyse` — `{ "url": "https://www.youtube.com/watch?v=VIDEO_ID" }`; returns 0–5 ranked clip windows and 0–3 timestamped comments.
-- `POST /api/clips/download` — `{ "videoId": "VIDEO_ID", "startSeconds": 70, "endSeconds": 80 }`; prepares and returns an MP4 attachment, or a JSON error.
+- `POST /api/clips/download` — `{ "videoId": "VIDEO_ID", "startSeconds": 70, "endSeconds": 80, "subtitles": true }`; prepares and returns a captioned MP4 attachment, or a JSON error. `subtitles` is optional and defaults to false for API clients.
 - `GET /api/demo` — deliberately synthetic test data, never presented as real replay measurements.
 - `GET /api/health` — local configuration summary without credentials.
 - `npm test` — offline tests; `npm run check` — tests and client build.
@@ -80,7 +108,7 @@ docs/                  Requirements, prior-dashboard handover, architecture
 - **“Most Replayed” means replay-relative signal**, not exact plays, video views, average retention or a creator's private YouTube Analytics. The official Data API has **no public Most Replayed endpoint**; `yt-dlp` parses public YouTube data, so extraction can break as YouTube changes. Update yt-dlp if necessary.
 - YouTube exposes this graph only for eligible videos. If missing, the app reports it as **unavailable**, not a guessed top five. Fewer than five clips can be returned if the video is too short or peaks overlap.
 - Comments are sampled (top/most relevant; max 100 by default), **not the entire comment history**. Without a Data API key the fallback uses `yt-dlp` and can be slower or unavailable.
-- The player is YouTube's embed. Some creators disable embedding or block content in a region; use **Watch on YouTube**. A preview alone does not save media; use **Download test clip** for a local MP4.
+- The player is YouTube's embed. Some creators disable embedding or block content in a region; use **Watch on YouTube**. A preview alone does not save media or show our subtitles; use the card's download icon for the final MP4.
 - Approval state exists only in this browser session; **export the JSON manifest** to keep it. Publishing will eventually require OAuth for the *destination* channel and permission to use source footage.
 - Always respect content rights, YouTube terms and API policies. Do not bypass private, age-restricted or paywalled content.
 

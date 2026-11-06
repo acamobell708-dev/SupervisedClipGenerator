@@ -14,11 +14,14 @@ export function validateClipDownload(input) {
       endSeconds > 7 * 24 * 60 * 60) {
     throw new AppError('Choose a valid clip longer than 0 and no longer than 15 seconds.', 400, 'INVALID_CLIP_RANGE');
   }
-  return { videoId, startSeconds, endSeconds };
+  if (input.subtitles !== undefined && typeof input.subtitles !== 'boolean') {
+    throw new AppError('subtitles must be true or false.', 400, 'INVALID_SUBTITLE_OPTION');
+  }
+  return { videoId, startSeconds, endSeconds, ...(input.subtitles === undefined ? {} : {subtitles: input.subtitles}) };
 }
 
 // No shell or user-controlled process arguments. Stop FFmpeg children as well as yt-dlp.
-export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_000 } = {}) {
+export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_000, missingMessage, timeoutMessage, errorForExit } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new AppError('Download cancelled.', 499, 'DOWNLOAD_CANCELLED'));
     const child = spawn(binary, args, {
@@ -42,21 +45,22 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
       }
     };
     const onAbort = () => stop(new AppError('Download cancelled.', 499, 'DOWNLOAD_CANCELLED'));
-    const timer = setTimeout(() => stop(new AppError('Clip preparation timed out. Please retry.', 504, 'DOWNLOAD_TIMEOUT')), timeoutMs);
+    const timer = setTimeout(() => stop(new AppError(timeoutMessage || 'Clip preparation timed out. Please retry.', 504, 'DOWNLOAD_TIMEOUT')), timeoutMs);
     const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
     child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-4000); });
     child.once('error', error => {
       cleanup();
-      reject(new AppError(error.code === 'ENOENT'
+      reject(new AppError(missingMessage || (error.code === 'ENOENT'
         ? `${path.basename(binary)} is not installed or not on PATH. Install yt-dlp and FFmpeg, then restart the app.`
-        : `Could not start ${path.basename(binary)}. Check its configured path.`, 503, 'DOWNLOAD_TOOL_MISSING'));
+        : `Could not start ${path.basename(binary)}. Check its configured path.`), 503, 'DOWNLOAD_TOOL_MISSING'));
     });
     child.once('close', code => {
       cleanup();
       if (stoppedError) return reject(stoppedError);
       if (code === 0) return resolve();
+      if (errorForExit) return reject(errorForExit(stderr));
       const missingFfmpeg = /ffmpeg.*(not found|not installed|could not find)/i.test(stderr);
       reject(new AppError(missingFfmpeg
         ? 'FFmpeg is unavailable. Install it or set FFMPEG_PATH, then restart the app.'
@@ -67,11 +71,12 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
 }
 
 export class ClipDownloadService {
-  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', run = runExportProcess, tempRoot = tmpdir() } = {}) {
+  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, run = runExportProcess, tempRoot = tmpdir() } = {}) {
     this.binary = binary;
     // yt-dlp expects --ffmpeg-location to be an existing path, not a PATH command.
     this.ffmpegPath = /^ffmpeg(?:\.exe)?$/i.test(ffmpegPath) ? ffmpegPath : path.resolve(ffmpegPath);
     this.run = run;
+    this.subtitleService = subtitleService;
     this.tempRoot = tempRoot;
     this.busy = false;
   }
@@ -85,11 +90,13 @@ export class ClipDownloadService {
   }
 
   async prepare(input, { signal } = {}) {
-    const { videoId, startSeconds, endSeconds } = validateClipDownload(input);
+    const { videoId, startSeconds, endSeconds, subtitles = false } = validateClipDownload(input);
+    if (subtitles && !this.subtitleService) throw new AppError('Local subtitles need setup. Run npm run setup:subtitles, then restart the app.', 503, 'SUBTITLES_SETUP_REQUIRED');
     if (this.busy) throw new AppError('Another test clip is being prepared. Please wait and retry.', 409, 'DOWNLOAD_BUSY');
     this.busy = true;
     let directory;
     try {
+      if (subtitles) await this.subtitleService.check({signal});
       await this.run(this.ffmpegPath, ['-version'], { signal, timeoutMs: 10_000 });
       directory = await mkdtemp(path.join(this.tempRoot, 'clipfoundry-'));
       await this.run(this.binary, [
@@ -101,17 +108,23 @@ export class ClipDownloadService {
         '--merge-output-format', 'mp4', '-o', 'clip.%(ext)s',
         `https://www.youtube.com/watch?v=${videoId}`,
       ], { cwd: directory, signal });
-      const filePath = path.join(directory, 'clip.mp4');
-      const file = await stat(filePath).catch(() => null);
+      let filePath = path.join(directory, 'clip.mp4');
+      let file = await stat(filePath).catch(() => null);
       if (!file?.isFile() || file.size === 0) {
         throw new AppError('No playable clip was produced. Try another segment.', 502, 'EMPTY_CLIP');
       }
       if (file.size > 50 * 1024 * 1024) {
         throw new AppError('The test clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
       }
+      if (subtitles) {
+        filePath = await this.subtitleService.render({filePath, directory, duration: endSeconds - startSeconds, signal});
+        file = await stat(filePath).catch(() => null);
+        if (!file?.isFile() || file.size === 0) throw new AppError('No captioned clip was produced. Please retry.', 502, 'SUBTITLES_EMPTY');
+        if (file.size > 50 * 1024 * 1024) throw new AppError('The captioned clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
+      }
       return {
         filePath,
-        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}.mp4`,
+        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}.mp4`,
         cleanup: () => this.removeTemporaryDirectory(directory),
       };
     } catch (error) {

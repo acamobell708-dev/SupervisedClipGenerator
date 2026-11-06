@@ -1,14 +1,19 @@
 import { config } from './config.js';
+import path from 'node:path';
 import { createApp } from './app.js';
 import { YtDlpClient } from './services/ytDlpClient.js';
 import { YouTubeCommentsClient } from './services/youtubeCommentsClient.js';
 import { ClipDiscoveryService } from './services/clipDiscoveryService.js';
 import { ClipDownloadService } from './services/clipDownloadService.js';
+import { LocalSubtitleService } from './services/localSubtitleService.js';
 
 const ytDlpClient = new YtDlpClient({binary: config.ytDlpPath, timeoutMs: config.ytDlpTimeoutMs});
 const commentsClient = new YouTubeCommentsClient({apiKey:config.youtubeApiKey, sampleLimit:config.commentSampleLimit});
 const service = new ClipDiscoveryService({ytDlpClient, commentsClient});
-const downloadService = new ClipDownloadService({binary: config.ytDlpPath, ffmpegPath: config.ffmpegPath});
+const ffmpegPath = /^ffmpeg(?:\.exe)?$/i.test(config.ffmpegPath) ? config.ffmpegPath : path.resolve(config.ffmpegPath);
+const subtitleService = new LocalSubtitleService({pythonPath: config.subtitlePythonPath, ffmpegPath,
+  model: config.whisperModel, language: config.whisperLanguage, timeoutMs: config.subtitleTimeoutMs});
+const downloadService = new ClipDownloadService({binary: config.ytDlpPath, ffmpegPath, subtitleService});
 const app = createApp({service, downloadService, config});
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`SupervisedClipGenerator is running at http://localhost:${config.port}`);

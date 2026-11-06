@@ -47,6 +47,8 @@ The client normalises replay and comment candidates with `getReviewClips`. Comme
 
 ## Security and operational constraints
 
+- Optional subtitle rendering runs after clip acquisition and before attachment delivery. `LocalSubtitleService` invokes `scripts/transcribe.py` in the isolated `.venv-subtitles` environment. faster-whisper uses CPU/int8, word timestamps, VAD and local-only model loading; only `npm run setup:subtitles` downloads weights. Decoded audio/model/language hashes key the local JSON transcript cache. The domain module validates times, clamps to clip duration, groups phrases and escapes ASS control syntax; FFmpeg burns fixed-name `captions.ass` into a temporary H.264 MP4. Source, transcript copy, ASS and render are cleaned together. Persistent model/transcript caches are gitignored. Subtitle setup failures are detected before media acquisition; no-speech errors never silently return raw video. Both download modes pass an explicit boolean option; the batch manifest records it.
+
 - The batch button snapshots approved replay/comment windows and calls the existing download route sequentially. The client packages the resulting MP4 blobs and a JSON manifest into one stored ZIP. It uses the same abort controller as individual downloads, prevents concurrent download actions in the UI, and saves the ZIP only after every approved clip succeeds. No upload API is called.
 
 - Test downloads use fixed argument arrays with local yt-dlp configuration ignored, an isolated temporary directory, one preparation at a time, a 180-second process timeout and a 50 MB response limit. Client disconnect/cancellation stops the process tree and cleans temporary files. FFmpeg can be configured with `FFMPEG_PATH`; missing tools produce actionable UI errors.

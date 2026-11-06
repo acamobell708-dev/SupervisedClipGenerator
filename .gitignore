@@ -5,3 +5,6 @@ public/assets/*.js.map
 .DS_Store
 *.log
 coverage/
+.venv-subtitles/
+.cache/
+__pycache__/
