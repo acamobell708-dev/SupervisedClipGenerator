@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, unlink, rmdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, symlink, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
@@ -66,10 +66,36 @@ test('library discovers category folders and legacy root videos, skips invalid f
   assert.equal(probes, 4); // Valid files cached; invalid file retried on refresh.
   const id = catalogue.categories[0].videos[0].id;
   const selected = await library.select(id, 12.77);
-  assert.equal(selected.filePath, files[0]);
+  // Windows runners may expose TEMP through an 8.3 alias (RUNNER~1).
+  // The library intentionally returns canonical paths after containment checks.
+  assert.equal(selected.filePath, await realpath(files[0]));
   assert.ok(selected.startSeconds >= 0 && selected.startSeconds <= 30 - 12.77);
   assert.equal((await library.select(id, 45)).startSeconds, 0); // Short assets start at zero and loop.
   await assert.rejects(library.select('f'.repeat(16), 10), {code: 'LOWER_VIDEO_NOT_FOUND'});
+});
+
+test('library accepts an aliased media root and returns the canonical file path', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lower-alias-test-'));
+  const actualRoot = path.join(directory, 'actual-media');
+  const aliasRoot = path.join(directory, 'media-alias');
+  const file = path.join(actualRoot, 'parkour.mp4');
+  await mkdir(actualRoot);
+  const removeIfPresent = async filePath => {try {await unlink(filePath);} catch (error) {if (error.code !== 'ENOENT') throw error;}};
+  t.after(async () => {
+    await removeIfPresent(aliasRoot);
+    await removeIfPresent(file);
+    await rmdir(actualRoot);
+    await rmdir(directory);
+  });
+  await writeFile(file, 'fixture');
+  await symlink(actualRoot, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  const library = new LowerVideoLibrary({directory: aliasRoot, run: async () => JSON.stringify({
+    streams: [{codec_type: 'video', width: 1280, height: 720, duration: '30'}],
+  })});
+  const catalogue = await library.catalogue();
+  const selected = await library.select(catalogue.categories[0].videos[0].id, 10);
+  assert.equal(selected.filePath, await realpath(file));
+  assert.notEqual(selected.filePath, path.join(aliasRoot, 'parkour.mp4'));
 });
 
 test('random selection visits every asset before repeating and handles removed assets', async () => {
