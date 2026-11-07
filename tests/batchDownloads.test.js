@@ -55,7 +55,7 @@ test('batch downloads only approved replay and comment clips sequentially into o
   assert.equal(archive.type, 'application/zip');
   const files = readStoredZip(await archive.arrayBuffer());
   assert.equal(files.get('01-replay-10-20.mp4').text, 'MP4 for 10');
-  assert.equal(files.get('02-timestamp-comment-45-55.mp4').text, 'MP4 for 45');
+  assert.equal(files.get('02-timestamp-comment-45-70.mp4').text, 'MP4 for 45');
   const manifest = JSON.parse(files.get('selections.json').text);
   assert.deepEqual(manifest.selectedClips.map(clip => clip.id), fetched);
   assert.equal(files.size, 3);
@@ -80,7 +80,7 @@ test('batch applies local subtitles to every approved window and records the ren
   });
   assert.equal(calls, 3);
   const files = readStoredZip(await archive.arrayBuffer());
-  assert.equal(files.get('03-timestamp-comment-45-55-subtitled.mp4').text, 'captioned MP4');
+  assert.equal(files.get('03-timestamp-comment-45-70-subtitled.mp4').text, 'captioned MP4');
   assert.equal(JSON.parse(files.get('selections.json').text).renderOptions.subtitles, true);
 });
 
@@ -114,8 +114,9 @@ test('batch snapshots the tape setting, applies it to each approved source, and 
   });
   const files = readStoredZip(await archive.arrayBuffer());
   assert.equal(calls, 2);
-  assert.equal(files.get('02-timestamp-comment-45-55-subtitled-tape.mp4').text, 'tape with captions');
+  assert.equal(files.get('02-timestamp-comment-45-70-subtitled-tape.mp4').text, 'tape with captions');
   assert.deepEqual(JSON.parse(files.get('selections.json').text).renderOptions, {subtitles: true, tapeSlowdown: true, shorts: false});
+  assert.deepEqual(JSON.parse(files.get('selections.json').text).tapeSlowdownProfile, {startFraction: 0.5, endSpeed: 0.6});
 });
 
 test('individual requests send Shorts independently or combined with the other effects', async t => {
@@ -140,14 +141,47 @@ test('Shorts batch applies every effect consistently and records portrait output
   });
   assert.equal(count, 2);
   const files = readStoredZip(await archive.arrayBuffer());
-  assert.equal(files.get('02-timestamp-comment-45-55-subtitled-tape-shorts.mp4').text, 'portrait captioned tape MP4');
+  assert.equal(files.get('02-timestamp-comment-45-70-subtitled-tape-shorts.mp4').text, 'portrait captioned tape MP4');
   const manifest = JSON.parse(files.get('selections.json').text);
   assert.deepEqual(manifest.renderOptions, {subtitles: true, tapeSlowdown: true, shorts: true});
-  assert.deepEqual(manifest.outputFormat, {width: 720, height: 1280, layout: 'fit-blurred-background'});
+  assert.deepEqual(manifest.outputFormat, {width: 720, height: 1280, foregroundZoom: 1.35, layout: 'zoomed-blurred-background'});
 });
 
 test('empty approval selection makes no download requests', async () => {
   await assert.rejects(prepareApprovedDownload({result, approved: new Set(), fetchClip: () => assert.fail('Unexpected download')}), /Approve at least one/);
+});
+
+test('lower-video batch records the actual selected asset and offset for every clip', async () => {
+  const cards = getReviewClips(result);
+  const archive = await prepareApprovedDownload({result, approved: new Set([cards[0].id, cards[2].id]), lowerVideo: true,
+    fetchClip: async (_id, clip, _signal, options) => {
+      assert.equal(options.shorts, true);
+      assert.equal(options.lowerVideoId, 'random');
+      options.onMetadata({id: `asset-${clip.startSeconds}`, label: 'Parkour', category: 'minecraft-parkour', startSeconds: 2.5, outputDuration: 10});
+      return new Blob(['lower panel MP4']);
+    },
+  });
+  const files = readStoredZip(await archive.arrayBuffer());
+  const manifest = JSON.parse(files.get('selections.json').text);
+  assert.equal(manifest.renderOptions.lowerVideo, true);
+  assert.equal(manifest.outputFormat.layout, 'zoomed-blurred-background-with-lower-video');
+  assert.deepEqual(manifest.selectedClips.map(clip => clip.lowerVideo.id), ['asset-10', 'asset-45']);
+  assert.equal(manifest.selectedClips[0].lowerVideo.startSeconds, 2.5);
+  assert.ok(files.has('01-replay-10-20-shorts-lower.mp4'));
+});
+
+test('individual lower-video request passes catalogue ID and reads export metadata', async t => {
+  const metadata = {id: 'a'.repeat(16), label: 'Parkour', startSeconds: 3};
+  let received;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.lowerVideo, true);
+    assert.equal(body.lowerVideoId, metadata.id);
+    assert.equal(body.shorts, true);
+    return new Response(new Blob(['MP4']), {headers: {'X-Lower-Video': encodeURIComponent(JSON.stringify(metadata))}});
+  });
+  await fetchClipBlob(result.video.id, getReviewClips(result)[0], undefined, {lowerVideo: true, lowerVideoId: metadata.id, onMetadata: value => {received = value;}});
+  assert.deepEqual(received, metadata);
 });
 
 test('cancellation stops the batch before the next clip and returns no partial ZIP', async () => {
@@ -179,7 +213,7 @@ test('clip fetch forwards the range and abort signal and rejects JSON errors and
   const controller = new AbortController();
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     assert.equal(options.signal, controller.signal);
-    assert.deepEqual(JSON.parse(options.body), {videoId: result.video.id, startSeconds: 45, endSeconds: 55});
+    assert.deepEqual(JSON.parse(options.body), {videoId: result.video.id, startSeconds: 45, endSeconds: 70});
     return new Response(JSON.stringify({error: 'Install FFmpeg'}), {status: 503, headers: {'Content-Type': 'application/json'}});
   });
   await assert.rejects(fetchClipBlob(result.video.id, getReviewClips(result)[2], controller.signal), /Install FFmpeg/);

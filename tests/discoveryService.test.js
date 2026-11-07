@@ -12,6 +12,8 @@ test('service returns real-source clips, public comment evidence, no tokens',asy
   assert.equal(result.sources.comments,'yt-dlp-public');
   assert.equal(result.timestampComments[0].atSeconds,45);
   assert.ok(result.clips.length>0 && result.clips.length<=5);
+  assert.ok(result.clips.every(clip => clip.durationSeconds === 25));
+  assert.ok(result.warnings.some(warning => warning.includes('target 25 seconds')));
   assert.equal(result.generatedAt,'2026-11-06T00:00:00.000Z');
 });
 test('missing heatmap and failing comments are explicitly unavailable',async()=>{

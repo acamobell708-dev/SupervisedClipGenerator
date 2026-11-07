@@ -8,9 +8,11 @@ export class ShortsExportService {
     this.ffmpegPath = ffmpegPath;
     this.run = run;
   }
-  async render({directory, subtitles = false, signal}) {
+  async render({directory, subtitles = false, lowerVideo, signal}) {
     await this.run(this.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', 'clip.mp4',
-      '-filter_complex', buildVideoFilterGraph({shorts: true, subtitles}), '-map', '[video]', '-map', '0:a:0?',
+      ...(lowerVideo ? ['-stream_loop', '-1', '-ss', String(lowerVideo.startSeconds), '-i', lowerVideo.filePath] : []),
+      '-filter_complex', buildVideoFilterGraph({shorts: true, subtitles, lowerVideo}), '-map', '[video]', '-map', '0:a:0?',
+      ...(lowerVideo ? ['-t', String(lowerVideo.outputDuration)] : []),
       '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', 'clip-shorts.mp4'], {
       cwd: directory, signal, timeoutMs: 300_000,

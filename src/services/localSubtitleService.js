@@ -8,13 +8,14 @@ import { AppError } from '../utils/AppError.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export class LocalSubtitleService {
-  constructor({pythonPath, ffmpegPath = 'ffmpeg', model = 'base', language = 'auto', timeoutMs = 300_000, run = runExportProcess} = {}) {
+  constructor({pythonPath, ffmpegPath = 'ffmpeg', model = 'base', language = 'auto', timeoutMs = 300_000, worker, run = runExportProcess} = {}) {
     this.pythonPath = pythonPath || path.join(root, '.venv-subtitles', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
     this.ffmpegPath = ffmpegPath;
     this.model = model;
     this.language = language;
     this.timeoutMs = timeoutMs;
     this.run = run;
+    this.worker = worker;
   }
   pythonArguments() {
     return [path.join(root, 'scripts/transcribe.py'), '--model', this.model, '--language', this.language,
@@ -32,15 +33,27 @@ export class LocalSubtitleService {
     };
   }
   async check({signal} = {}) {
+    if (this.worker) return this.worker.check({signal});
     await this.run(this.pythonPath, [...this.pythonArguments(), '--check'], {...this.processOptions(signal), timeoutMs: 30_000});
   }
-  async prepareCaptions({filePath, directory, duration, mapTime, shorts = false, signal}) {
+  async transcribe({filePath, directory, signal}) {
+    if (this.worker) {
+      const transcript = await this.worker.transcribe(filePath, {signal});
+      if (!Array.isArray(transcript?.words)) throw new AppError('Local transcription returned invalid words.', 502, 'SUBTITLES_INVALID');
+      await writeFile(path.join(directory, 'transcript.json'), JSON.stringify(transcript), 'utf8');
+      return transcript;
+    }
     await this.run(this.pythonPath, [...this.pythonArguments(), '--input', filePath, '--output', path.join(directory, 'transcript.json')], this.processOptions(signal));
     let transcript;
     try { transcript = JSON.parse(await readFile(path.join(directory, 'transcript.json'), 'utf8')); }
     catch { throw new AppError('Local transcription returned invalid data. Please retry.', 502, 'SUBTITLES_INVALID'); }
+    if (!Array.isArray(transcript?.words)) throw new AppError('Local transcription returned invalid words.', 502, 'SUBTITLES_INVALID');
+    return transcript;
+  }
+  async prepareCaptions({filePath, directory, duration, mapTime, shorts = false, lowerVideo = false, signal}) {
+    let transcript = await this.transcribe({filePath, directory, signal});
     if (shorts) transcript = {...transcript, ...SHORTS_DIMENSIONS};
-    await writeFile(path.join(directory, 'captions.ass'), buildSubtitleAss(transcript, duration, {mapTime, portraitSafeArea: shorts}), 'utf8');
+    await writeFile(path.join(directory, 'captions.ass'), buildSubtitleAss(transcript, duration, {mapTime, portraitSafeArea: shorts, lowerVideo}), 'utf8');
   }
   async render({filePath, directory, duration, signal}) {
     await this.prepareCaptions({filePath, directory, duration, signal});

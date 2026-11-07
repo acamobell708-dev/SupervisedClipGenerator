@@ -8,7 +8,7 @@ export class YouTubeCommentsClient {
     this.sampleLimit = sampleLimit;
   }
 
-  async getTopComments(videoId) {
+  async getTopComments(videoId, {signal} = {}) {
     if (!this.apiKey) throw new AppError('No YouTube API key configured.', 503, 'API_KEY_MISSING');
     const comments = [];
     let pageToken;
@@ -23,7 +23,7 @@ export class YouTubeCommentsClient {
       });
       if (pageToken) params.set('pageToken', pageToken);
       const response = await this.fetch(`https://www.googleapis.com/youtube/v3/commentThreads?${params}`, {
-        signal: AbortSignal.timeout(12000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       });
       if (!response.ok) {
         throw new AppError(

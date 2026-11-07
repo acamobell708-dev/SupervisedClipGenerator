@@ -22,11 +22,14 @@ test('download rejects malformed IDs, command injection and invalid ranges befor
   for (const input of [null, {}, {...selection, videoId: 'https://example.com/video'},
     {...selection, videoId: 'M7lc1UVf-VE;whoami'}, {...selection, startSeconds: -1},
     {...selection, startSeconds: '70'}, {...selection, endSeconds: Infinity},
-    {...selection, endSeconds: 70.5}, {...selection, endSeconds: 86},
+    {...selection, endSeconds: 70.5}, {...selection, endSeconds: 100.501},
     {...selection, startSeconds: 700000, endSeconds: 700010}]) {
     await assert.rejects(service.prepare(input), {status: 400});
   }
   assert.deepEqual(validateClipDownload(selection), selection);
+  assert.equal(validateClipDownload({...selection, endSeconds: 95.5}).endSeconds, 95.5);
+  assert.equal(validateClipDownload({...selection, endSeconds: 100.5}).endSeconds, 100.5);
+  assert.equal(validateClipDownload({...selection, startSeconds: 7.7, endSeconds: 32.7}).endSeconds, 32.7);
 });
 
 test('export uses exact selected range and canonical URL, returns MP4, and removes temporary files', async t => {
@@ -124,7 +127,7 @@ test('download API validates before export and returns tool errors as JSON', asy
     calls++;
     throw new AppError('Install FFmpeg, then restart the app.', 503, 'DOWNLOAD_TOOL_MISSING');
   }});
-  const bad = await post({...selection, endSeconds: 100});
+  const bad = await post({...selection, endSeconds: 101});
   assert.equal(bad.status, 400);
   assert.equal(calls, 0);
   const response = await post(selection);

@@ -13,6 +13,7 @@ def main():
     parser.add_argument('--input')
     parser.add_argument('--output')
     parser.add_argument('--duration', type=float)
+    parser.add_argument('--start-fraction', type=float, default=0.5)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     try:
@@ -24,8 +25,11 @@ def main():
     if args.check:
         print('Local tape resampler ready.')
         return 0
-    if not args.input or not args.output or not args.duration or not math.isfinite(args.duration) or not 0 < args.duration <= 30:
-        parser.error('Supply --input, --output and a finite --duration between 0 and 30 seconds.')
+    # Match the JS plan: 30-second selection plus up to one second of media padding.
+    if not args.input or not args.output or not args.duration or not math.isfinite(args.duration) or not 0 < args.duration <= 31:
+        parser.error('Supply --input, --output and a finite --duration between 0 and 31 seconds.')
+    if not math.isfinite(args.start_fraction) or not 0 <= args.start_fraction < 1:
+        parser.error('--start-fraction must be at least zero and less than one.')
     with av.open(args.input) as container:
         stream = next(iter(container.streams.audio), None)
         if stream is None:
@@ -42,7 +46,9 @@ def main():
         return 3
     samples = np.concatenate(chunks, axis=1)
     drop = 1 - END_SPEED
-    output_duration = -args.duration / drop * math.log(END_SPEED)
+    start_seconds = args.duration * args.start_fraction
+    ramp_duration = args.duration - start_seconds
+    output_duration = start_seconds - ramp_duration / drop * math.log(END_SPEED)
     output_samples = round(output_duration * SAMPLE_RATE)
     # A 32-tap Lanczos-windowed sinc interpolator avoids the treble loss of linear
     # interpolation. Small blocks bound working memory and keep stereo channels aligned.
@@ -53,7 +59,12 @@ def main():
         output.setframerate(SAMPLE_RATE)
         for offset in range(0, output_samples, 4096):
             times = np.arange(offset, min(offset + 4096, output_samples), dtype=np.float64) / SAMPLE_RATE
-            positions = -args.duration / drop * np.expm1(-drop * times / args.duration) * SAMPLE_RATE
+            # Invert the exact same piecewise clock as the JS/FFmpeg video map.
+            # Source positions are unchanged through the first 50% of the clip.
+            ramp_times = np.maximum(0, times - start_seconds)
+            source_times = np.where(times <= start_seconds, times,
+                                    start_seconds - ramp_duration / drop * np.expm1(-drop * ramp_times / ramp_duration))
+            positions = source_times * SAMPLE_RATE
             indices = np.floor(positions).astype(np.int64)[:, None] + taps
             distance = positions[:, None] - indices
             weights = np.sinc(distance) * np.sinc(distance / 16)

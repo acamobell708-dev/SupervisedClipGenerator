@@ -19,8 +19,8 @@ test('timestamp cards follow replay cards and retain distinct identities, timest
   assert.equal(comment.sourceKind, 'timestamp-comment');
   assert.notEqual(comment.id, cards[0].id);
   assert.equal(comment.startSeconds, 45);
-  assert.equal(comment.endSeconds, 55);
-  assert.equal(comment.durationSeconds, 10);
+  assert.equal(comment.endSeconds, 70);
+  assert.equal(comment.durationSeconds, 25);
   assert.equal(comment.comment.excerpt, '0:45 is the highlight!');
   assert.equal(comment.comment.text, result.timestampComments[0].text);
   assert.equal(comment.comment.likes, 42);

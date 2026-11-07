@@ -1,8 +1,9 @@
-import { selectTopClips } from '../domain/heatmapRanker.js';
+import { normaliseHeatmap, selectTopClips } from '../domain/heatmapRanker.js';
+import { SMART_ENDING_RULES, suggestSmartEnding } from '../domain/smartEnding.js';
 import { selectTimestampComments } from '../domain/timestampComments.js';
 
 /** Synthetic offline example. Never display as actual YouTube evidence. */
-export function demoFixture() {
+export function demoFixture({smartEnding = false} = {}) {
   const videoId = 'M7lc1UVf-VE';
   const durationSeconds = 240;
   const peaks = [23, 74, 118, 165, 214];
@@ -18,9 +19,13 @@ export function demoFixture() {
   ];
   return {
     status:'demo', generatedAt: new Date().toISOString(),
+    discoveryOptions: {smartEnding, ...(smartEnding ? {smartEndingRules: SMART_ENDING_RULES} : {})},
     video:{id:videoId, url:`https://www.youtube.com/watch?v=${videoId}`, title:'Example video — synthetic replay and comment data', channel:'Offline demo / not real analytics', durationSeconds, thumbnail:`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, viewCount:null, embeddable:true},
-    clips:selectTopClips(heatmap,durationSeconds).map(clip=>({...clip,url:`https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(clip.startSeconds)}s`})),
-    timestampComments:selectTimestampComments(comments,durationSeconds).map(c=>({...c,url:`https://www.youtube.com/watch?v=${videoId}&t=${c.atSeconds}s`})),
+    clips:selectTopClips(heatmap,durationSeconds,{smartEnding}).map(clip=>({...clip,url:`https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(clip.startSeconds)}s`})),
+    timestampComments:selectTimestampComments(comments,durationSeconds).map(c=>{
+      const decision = smartEnding ? suggestSmartEnding(normaliseHeatmap(heatmap,durationSeconds), c.atSeconds, Math.min(durationSeconds,c.atSeconds+25),durationSeconds) : null;
+      return {...c, ...(decision ? {endSeconds:decision.endSeconds,smartEnding:decision} : {}),url:`https://www.youtube.com/watch?v=${videoId}&t=${c.atSeconds}s`};
+    }),
     sources:{replay:'synthetic-demo',comments:'synthetic-demo',sampledCommentCount:3,accuracy:'Demonstration data only. Not YouTube replay or comment measurements.'},
     warnings:['DEMO MODE: Heatmap, clips and comments are synthetic. Use Analyse video to get real public YouTube data.'],
   };

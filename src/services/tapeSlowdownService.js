@@ -44,14 +44,16 @@ export class TapeSlowdownService {
     const duration = Number(video.duration) > 0 ? Number(video.duration) : Number(metadata.format?.duration);
     return {...createTapeTimeline(duration), hasAudio: metadata.streams.some(stream => stream.codec_type === 'audio')};
   }
-  async render({directory, plan, subtitles = false, shorts = false, signal}) {
+  async render({directory, plan, subtitles = false, shorts = false, lowerVideo, signal}) {
     if (plan.hasAudio) await this.run(this.pythonPath, [path.join(root, 'scripts/tape_slowdown.py'),
       '--input', path.join(directory, 'clip.mp4'), '--output', path.join(directory, 'tape-audio.wav'),
-      '--duration', String(plan.duration)], this.processOptions(signal));
-    const filter = buildVideoFilterGraph({beforeLayout: plan.videoFilter, shorts, subtitles});
+      '--duration', String(plan.duration), '--start-fraction', String(plan.startFraction)], this.processOptions(signal));
+    const filter = buildVideoFilterGraph({beforeLayout: plan.videoFilter, shorts, subtitles, lowerVideo, lowerInput: plan.hasAudio ? 2 : 1});
     await this.run(this.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', 'clip.mp4',
       ...(plan.hasAudio ? ['-i', 'tape-audio.wav'] : []),
+      ...(lowerVideo ? ['-stream_loop', '-1', '-ss', String(lowerVideo.startSeconds), '-i', lowerVideo.filePath] : []),
       '-filter_complex', filter, '-map', '[video]', ...(plan.hasAudio ? ['-map', '1:a:0', '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+      ...(lowerVideo ? ['-t', String(lowerVideo.outputDuration)] : []),
       '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'clip-tape.mp4'], {
       cwd: directory, signal, timeoutMs: 300_000,
       errorForExit: () => new AppError('Tape slowdown rendering failed. Check FFmpeg/libx264 support or turn the effect off.', 502, 'TAPE_RENDER_FAILED'),

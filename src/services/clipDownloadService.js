@@ -4,15 +4,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseYouTubeVideoId } from '../domain/videoUrl.js';
 import { AppError } from '../utils/AppError.js';
+import { MAX_CLIP_SECONDS } from '../domain/clipDuration.js';
 
 export function validateClipDownload(input) {
   const videoId = parseYouTubeVideoId(input?.videoId);
   const { startSeconds, endSeconds } = input;
   if (typeof startSeconds !== 'number' || typeof endSeconds !== 'number' ||
       !Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) ||
-      startSeconds < 0 || endSeconds <= startSeconds || endSeconds - startSeconds > 15 ||
+      startSeconds < 0 || endSeconds <= startSeconds || endSeconds - startSeconds > MAX_CLIP_SECONDS + 1e-6 ||
       endSeconds > 7 * 24 * 60 * 60) {
-    throw new AppError('Choose a valid clip longer than 0 and no longer than 15 seconds.', 400, 'INVALID_CLIP_RANGE');
+    throw new AppError(`Choose a valid clip longer than 0 and no longer than ${MAX_CLIP_SECONDS} seconds.`, 400, 'INVALID_CLIP_RANGE');
   }
   if (input.subtitles !== undefined && typeof input.subtitles !== 'boolean') {
     throw new AppError('subtitles must be true or false.', 400, 'INVALID_SUBTITLE_OPTION');
@@ -23,13 +24,21 @@ export function validateClipDownload(input) {
   if (input.shorts !== undefined && typeof input.shorts !== 'boolean') {
     throw new AppError('shorts must be true or false.', 400, 'INVALID_SHORTS_OPTION');
   }
+  if (input.lowerVideo !== undefined && typeof input.lowerVideo !== 'boolean') {
+    throw new AppError('lowerVideo must be true or false.', 400, 'INVALID_LOWER_VIDEO_OPTION');
+  }
+  if (input.lowerVideoId !== undefined && (typeof input.lowerVideoId !== 'string' || !/^(random|[a-f0-9]{16})$/.test(input.lowerVideoId))) {
+    throw new AppError('Choose a lower video from the list.', 400, 'INVALID_LOWER_VIDEO_ID');
+  }
   return { videoId, startSeconds, endSeconds, ...(input.subtitles === undefined ? {} : {subtitles: input.subtitles}),
     ...(input.tapeSlowdown === undefined ? {} : {tapeSlowdown: input.tapeSlowdown}),
-    ...(input.shorts === undefined ? {} : {shorts: input.shorts}) };
+    ...(input.shorts === undefined ? {} : {shorts: input.shorts}),
+    ...(input.lowerVideo === undefined ? {} : {lowerVideo: input.lowerVideo}),
+    ...(input.lowerVideoId === undefined ? {} : {lowerVideoId: input.lowerVideoId}) };
 }
 
 // No shell or user-controlled process arguments. Stop FFmpeg children as well as yt-dlp.
-export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_000, missingMessage, timeoutMessage, errorForExit, captureStdout = false } = {}) {
+export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_000, missingMessage, timeoutMessage, errorForExit, captureStdout = false, maxStdoutBytes = 128 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new AppError('Download cancelled.', 499, 'DOWNLOAD_CANCELLED'));
     const child = spawn(binary, args, {
@@ -60,7 +69,7 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
     if (signal?.aborted) onAbort();
     child.stdout?.on('data', chunk => {
       stdout += chunk.toString();
-      if (Buffer.byteLength(stdout) > 128 * 1024) stop(new AppError('Media inspection output was too large.', 502, 'MEDIA_OUTPUT_LIMIT'));
+      if (Buffer.byteLength(stdout) > maxStdoutBytes) stop(new AppError('Media inspection output was too large.', 502, 'MEDIA_OUTPUT_LIMIT'));
     });
     child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-4000); });
     child.once('error', error => {
@@ -84,7 +93,7 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
 }
 
 export class ClipDownloadService {
-  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, tapeService, shortsService, run = runExportProcess, tempRoot = tmpdir() } = {}) {
+  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, tapeService, shortsService, lowerVideoLibrary, run = runExportProcess, tempRoot = tmpdir() } = {}) {
     this.binary = binary;
     // yt-dlp expects --ffmpeg-location to be an existing path, not a PATH command.
     this.ffmpegPath = /^ffmpeg(?:\.exe)?$/i.test(ffmpegPath) ? ffmpegPath : path.resolve(ffmpegPath);
@@ -92,6 +101,7 @@ export class ClipDownloadService {
     this.subtitleService = subtitleService;
     this.tapeService = tapeService;
     this.shortsService = shortsService;
+    this.lowerVideoLibrary = lowerVideoLibrary;
     this.tempRoot = tempRoot;
     this.busy = false;
   }
@@ -105,7 +115,9 @@ export class ClipDownloadService {
   }
 
   async prepare(input, { signal } = {}) {
-    const { videoId, startSeconds, endSeconds, subtitles = false, tapeSlowdown = false, shorts = false } = validateClipDownload(input);
+    const { videoId, startSeconds, endSeconds, subtitles = false, tapeSlowdown = false, shorts: requestedShorts = false, lowerVideo = false, lowerVideoId = 'random' } = validateClipDownload(input);
+    const shorts = requestedShorts || lowerVideo;
+    if (lowerVideo && !this.lowerVideoLibrary) throw new AppError('Lower videos are unavailable. Restart the app.', 503, 'LOWER_VIDEO_UNAVAILABLE');
     if (subtitles && !this.subtitleService) throw new AppError('Local subtitles need setup. Run npm run setup:subtitles, then restart the app.', 503, 'SUBTITLES_SETUP_REQUIRED');
     if (tapeSlowdown && !this.tapeService) throw new AppError('Tape slowdown is unavailable. Restart the app or turn the effect off.', 503, 'TAPE_UNAVAILABLE');
     if (shorts && !tapeSlowdown && !this.shortsService) throw new AppError('Shorts layout is unavailable. Restart the app or turn Shorts 9:16 off.', 503, 'SHORTS_UNAVAILABLE');
@@ -134,13 +146,17 @@ export class ClipDownloadService {
       if (file.size > 50 * 1024 * 1024) {
         throw new AppError('The test clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
       }
+      let lower;
       if (tapeSlowdown) {
         const plan = await this.tapeService.plan({directory, signal});
-        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: plan.duration, mapTime: plan.mapTime, shorts, signal});
-        filePath = await this.tapeService.render({directory, plan, subtitles, shorts, signal});
+        if (lowerVideo) lower = await this.lowerVideoLibrary.select(lowerVideoId, plan.outputDuration, signal);
+        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: plan.duration, mapTime: plan.mapTime, shorts, ...(lowerVideo ? {lowerVideo: true} : {}), signal});
+        filePath = await this.tapeService.render({directory, plan, subtitles, shorts, ...(lower ? {lowerVideo: lower} : {}), signal});
       } else if (shorts) {
-        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: endSeconds - startSeconds, shorts: true, signal});
-        filePath = await this.shortsService.render({directory, subtitles, signal});
+        const duration = lowerVideo ? (await this.lowerVideoLibrary.probe(filePath, signal)).duration : endSeconds - startSeconds;
+        if (lowerVideo) lower = await this.lowerVideoLibrary.select(lowerVideoId, duration, signal);
+        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration, shorts: true, ...(lowerVideo ? {lowerVideo: true} : {}), signal});
+        filePath = await this.shortsService.render({directory, subtitles, ...(lower ? {lowerVideo: lower} : {}), signal});
       } else if (subtitles) {
         filePath = await this.subtitleService.render({filePath, directory, duration: endSeconds - startSeconds, signal});
       }
@@ -151,7 +167,8 @@ export class ClipDownloadService {
       }
       return {
         filePath,
-        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}${shorts ? '-shorts' : ''}.mp4`,
+        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}${shorts ? '-shorts' : ''}${lower ? '-lower' : ''}.mp4`,
+        ...(lower ? {lowerVideo: {id: lower.id, label: lower.label, category: lower.category, startSeconds: lower.startSeconds, outputDuration: lower.outputDuration}} : {}),
         cleanup: () => this.removeTemporaryDirectory(directory),
       };
     } catch (error) {

@@ -3,34 +3,48 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createTapeTimeline } from '../src/domain/tapeSlowdown.js';
+import { createTapeTimeline, TAPE_START_FRACTION } from '../src/domain/tapeSlowdown.js';
 import { buildSubtitleAss } from '../src/domain/subtitles.js';
 import { TapeSlowdownService } from '../src/services/tapeSlowdownService.js';
 import { ClipDownloadService, runExportProcess, validateClipDownload } from '../src/services/clipDownloadService.js';
 
 const selection = {videoId: 'M7lc1UVf-VE', startSeconds: 0, endSeconds: 10};
 
-test('tape curve is normalised per clip, finishes at 60%, and integrates playback time', () => {
-  for (const duration of [0.5, 5, 10, 15]) {
+test('tape curve holds the opening 50% unchanged, then finishes at 60% with continuous timing', () => {
+  for (const duration of [0.5, 5, 10, 15, 25, 30, 30.03]) {
     const timeline = createTapeTimeline(duration);
     assert.equal(timeline.speedAt(0), 1);
-    assert.equal(timeline.speedAt(duration / 2), 0.8);
+    const onset = duration * TAPE_START_FRACTION;
+    assert.equal(timeline.startSeconds, onset);
+    assert.equal(timeline.speedAt(onset), 1);
+    assert.equal(timeline.speedAt(duration * 0.4), 1);
+    assert.equal(timeline.mapTime(duration * 0.4), duration * 0.4);
+    assert.equal(timeline.mapTime(onset), onset);
+    assert.ok(Math.abs(timeline.speedAt(onset + (duration - onset) / 2) - 0.8) < 1e-12);
     assert.equal(timeline.speedAt(duration), 0.6);
     assert.equal(timeline.mapTime(0), 0);
-    assert.ok(Math.abs(timeline.outputDuration / duration - 1.277064059414977) < 1e-12);
+    assert.ok(Math.abs(timeline.outputDuration / duration - (0.5 + 0.5 * 1.277064059414977)) < 1e-12);
     assert.ok(timeline.mapTime(duration * 0.8) > timeline.mapTime(duration * 0.7));
-    const at = duration / 2, epsilon = 1e-5;
+    const at = onset + (duration - onset) / 2, epsilon = 1e-5;
     const derivative = (timeline.mapTime(at + epsilon) - timeline.mapTime(at - epsilon)) / (2 * epsilon);
     assert.ok(Math.abs(derivative - 1 / timeline.speedAt(at)) < 1e-6);
+    const onsetDerivative = (timeline.mapTime(onset + epsilon) - timeline.mapTime(onset - epsilon)) / (2 * epsilon);
+    assert.ok(Math.abs(onsetDerivative - 1) < 2e-5);
+    assert.ok(Math.abs(timeline.mapTime(onset + epsilon) - onset) < 2 * epsilon);
+    assert.equal(timeline.mapTime(-1), 0);
+    assert.equal(timeline.mapTime(duration + 1), timeline.outputDuration);
+    assert.match(timeline.videoFilter, /if\(lte\(T,/);
     assert.match(timeline.videoFilter, /setpts=.*log/);
   }
-  for (const duration of [0, -1, NaN, Infinity, 31]) assert.throws(() => createTapeTimeline(duration), {code: 'TAPE_INVALID_DURATION'});
+  for (const duration of [0, -1, NaN, Infinity, 31.01]) assert.throws(() => createTapeTimeline(duration), {code: 'TAPE_INVALID_DURATION'});
 });
 
 test('subtitle timings use the same nonlinear video/audio map', () => {
   const timeline = createTapeTimeline(10);
   const ass = buildSubtitleAss({width: 640, height: 360, words: [{text: 'Halfway.', start: 5, end: 6}]}, 10, {mapTime: timeline.mapTime});
-  assert.match(ass, /Dialogue: 0,0:00:05\.58,0:00:06\.86,Default,,0,0,0,,Halfway\./);
+  assert.match(ass, /Dialogue: 0,0:00:05\.00,0:00:06\.04,Default,,0,0,0,,Halfway\./);
+  const opening = buildSubtitleAss({width: 640, height: 360, words: [{text: 'Opening.', start: 1, end: 2}]}, 10, {mapTime: timeline.mapTime});
+  assert.match(opening, /0:00:01\.00,0:00:02\.00/);
 });
 
 test('tape option accepts only booleans and unsupported requests fail before acquisition', async () => {
@@ -66,6 +80,7 @@ test('tape renderer resamples audio then combines warped video, remapped caption
   assert.equal(calls[0].binary, 'python-test');
   assert.ok(calls[0].args[0].endsWith('tape_slowdown.py'));
   assert.equal(calls[0].args[calls[0].args.indexOf('--duration') + 1], '10');
+  assert.equal(calls[0].args[calls[0].args.indexOf('--start-fraction') + 1], '0.5');
   const render = calls[1];
   assert.equal(render.binary, 'ffmpeg');
   assert.equal(render.options.cwd, directory);

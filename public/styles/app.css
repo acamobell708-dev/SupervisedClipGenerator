@@ -201,3 +201,11 @@ h1,h2,h3{font-family:'Space Grotesk','DM Sans',sans-serif}
   .feature-card h3{display:block;margin:8px 0 0}
 }
 @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+.lower-video-options{display:grid;grid-template-columns:auto minmax(0,1fr) 30px;align-items:center;gap:6px;margin-top:7px;padding:7px;border:1px solid #34364a;border-radius:7px;background:#171b28}
+.lower-video-options .export-option{padding:0;border:0;background:none;min-height:28px}
+.lower-video-options select{width:100%;min-width:0;height:30px;padding:4px 6px;border:1px solid #45465c;border-radius:5px;background:#202435;color:#eeedf7;font:inherit;font-size:11px}
+.lower-video-refresh{height:30px;padding:0;border:1px solid #45465c;border-radius:5px;background:#202435;color:#eeedf7;font-size:18px;cursor:pointer}
+.lower-video-options select:disabled,.lower-video-refresh:disabled{opacity:.55;cursor:not-allowed}
+.lower-video-status{grid-column:1/-1;margin:0;font-size:11px;color:#b8b8ca}
+.discovery-option{min-height:28px;padding:4px 7px;flex-shrink:0}
+.clip-ending-note{font-size:10px;line-height:1.4;color:#c6baff;margin-top:4px}

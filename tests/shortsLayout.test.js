@@ -12,13 +12,14 @@ import { ClipDownloadService, validateClipDownload } from '../src/services/clipD
 
 const selection = {videoId: 'M7lc1UVf-VE', startSeconds: 0, endSeconds: 10};
 
-test('Shorts graph fits the full foreground and only crops/blurs the background', () => {
+test('Shorts graph enlarges and centre-crops the foreground over a blurred background', () => {
   assert.deepEqual(SHORTS_DIMENSIONS, {width: 720, height: 1280});
   const graph = buildVideoFilterGraph({shorts: true});
   const foreground = graph.split(';').find(branch => branch.startsWith('[foregroundSource]'));
   const background = graph.split(';').find(branch => branch.startsWith('[backgroundSource]'));
-  assert.match(foreground, /scale=720:1280:force_original_aspect_ratio=decrease/);
-  assert.doesNotMatch(foreground, /crop|blur/);
+  assert.match(foreground, /scale=972:1728:force_original_aspect_ratio=decrease/);
+  assert.match(foreground, /crop=w='min\(iw,720\)':h='min\(ih,1280\)'/);
+  assert.doesNotMatch(foreground, /blur/);
   assert.match(background, /force_original_aspect_ratio=increase.*crop=720:1280.*gblur=/);
   assert.match(graph, /overlay=\(W-w\)\/2:\(H-h\)\/2/);
   assert.match(graph, /setsar=1,format=yuv420p\[video\]$/);
@@ -61,7 +62,7 @@ test('portrait subtitle preparation uses final canvas dimensions and wider safe 
   assert.match(ass, /PlayResX: 720\nPlayResY: 1280/);
   assert.match(ass, /Style: Default,Arial,70,/);
   assert.match(ass, /,2,86,86,205,1/);
-  assert.match(ass, /0:00:05\.58,0:00:06\.86/);
+  assert.match(ass, /0:00:05\.00,0:00:06\.04/);
 });
 
 test('Shorts option rejects non-booleans and unsupported export before acquisition', async () => {

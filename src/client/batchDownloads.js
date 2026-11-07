@@ -1,11 +1,13 @@
 import { selectionManifest } from './reviewClips.js';
-import { SHORTS_DIMENSIONS } from '../domain/shortsLayout.js';
+import { SHORTS_DIMENSIONS, SHORTS_FOREGROUND_ZOOM } from '../domain/shortsLayout.js';
+import { TAPE_START_FRACTION, TAPE_END_SPEED } from '../domain/tapeSlowdown.js';
 
-export async function fetchClipBlob(videoId, clip, signal, {subtitles = false, tapeSlowdown = false, shorts = false} = {}) {
+export async function fetchClipBlob(videoId, clip, signal, {subtitles = false, tapeSlowdown = false, shorts = false, lowerVideo = false, lowerVideoId = 'random', onMetadata} = {}) {
   const response = await fetch('/api/clips/download', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, signal,
     body: JSON.stringify({videoId, startSeconds: clip.startSeconds, endSeconds: clip.endSeconds,
-      ...(subtitles ? {subtitles: true} : {}), ...(tapeSlowdown ? {tapeSlowdown: true} : {}), ...(shorts ? {shorts: true} : {})}),
+      ...(subtitles ? {subtitles: true} : {}), ...(tapeSlowdown ? {tapeSlowdown: true} : {}), ...(shorts || lowerVideo ? {shorts: true} : {}),
+      ...(lowerVideo ? {lowerVideo: true, lowerVideoId} : {})}),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -13,6 +15,8 @@ export async function fetchClipBlob(videoId, clip, signal, {subtitles = false, t
   }
   const blob = await response.blob();
   if (!blob.size) throw new Error('The downloaded clip was empty. Please retry.');
+  const metadata = response.headers?.get('X-Lower-Video');
+  if (metadata && onMetadata) onMetadata(JSON.parse(decodeURIComponent(metadata)));
   return blob;
 }
 
@@ -71,19 +75,24 @@ export async function createClipZip(files, signal) {
   return new Blob([...chunks, ...directory, end], {type: 'application/zip'});
 }
 
-export async function prepareApprovedDownload({result, approved, signal, subtitles = false, tapeSlowdown = false, shorts = false, onProgress = () => {}, fetchClip = fetchClipBlob}) {
+export async function prepareApprovedDownload({result, approved, signal, subtitles = false, tapeSlowdown = false, shorts = false, lowerVideo = false, lowerVideoId = 'random', onProgress = () => {}, fetchClip = fetchClipBlob}) {
+  shorts = shorts || lowerVideo;
   // Capture approvals once so toggles during preparation cannot alter the batch.
   const manifest = selectionManifest(result, approved);
   manifest.renderOptions = {subtitles, tapeSlowdown, shorts};
-  if (shorts) manifest.outputFormat = {...SHORTS_DIMENSIONS, layout: 'fit-blurred-background'};
+  if (tapeSlowdown) manifest.tapeSlowdownProfile = {startFraction: TAPE_START_FRACTION, endSpeed: TAPE_END_SPEED};
+  if (lowerVideo) Object.assign(manifest.renderOptions, {lowerVideo, lowerVideoId});
+  if (shorts) manifest.outputFormat = {...SHORTS_DIMENSIONS, foregroundZoom: SHORTS_FOREGROUND_ZOOM,
+    layout: lowerVideo ? 'zoomed-blurred-background-with-lower-video' : 'zoomed-blurred-background'};
   if (!manifest.selectedClips.length) throw new Error('Approve at least one clip first.');
   const files = [];
   for (const [index, clip] of manifest.selectedClips.entries()) {
     signal?.throwIfAborted();
     onProgress({index: index + 1, total: manifest.selectedClips.length, clip});
-    const blob = await fetchClip(result.video.id, clip, signal, {subtitles, ...(tapeSlowdown ? {tapeSlowdown: true} : {}), ...(shorts ? {shorts: true} : {})});
+    const blob = await fetchClip(result.video.id, clip, signal, {subtitles, ...(tapeSlowdown ? {tapeSlowdown: true} : {}), ...(shorts ? {shorts: true} : {}),
+      ...(lowerVideo ? {lowerVideo, lowerVideoId, onMetadata: metadata => {clip.lowerVideo = metadata;}} : {})});
     signal?.throwIfAborted();
-    files.push({name: `${String(index + 1).padStart(2, '0')}-${clip.sourceKind}-${clip.startSeconds}-${clip.endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}${shorts ? '-shorts' : ''}.mp4`, blob});
+    files.push({name: `${String(index + 1).padStart(2, '0')}-${clip.sourceKind}-${clip.startSeconds}-${clip.endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}${shorts ? '-shorts' : ''}${lowerVideo ? '-lower' : ''}.mp4`, blob});
   }
   files.push({name: 'selections.json', blob: new Blob([JSON.stringify(manifest, null, 2)], {type: 'application/json'})});
   onProgress({index: manifest.selectedClips.length, total: manifest.selectedClips.length, packing: true});

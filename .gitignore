@@ -8,3 +8,6 @@ coverage/
 .venv-subtitles/
 .cache/
 __pycache__/
+
+# Local video assets
+*.mp4
