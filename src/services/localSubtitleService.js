@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runExportProcess } from './clipDownloadService.js';
 import { buildSubtitleAss } from '../domain/subtitles.js';
+import { SHORTS_DIMENSIONS } from '../domain/shortsLayout.js';
 import { AppError } from '../utils/AppError.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -33,12 +34,13 @@ export class LocalSubtitleService {
   async check({signal} = {}) {
     await this.run(this.pythonPath, [...this.pythonArguments(), '--check'], {...this.processOptions(signal), timeoutMs: 30_000});
   }
-  async prepareCaptions({filePath, directory, duration, mapTime, signal}) {
+  async prepareCaptions({filePath, directory, duration, mapTime, shorts = false, signal}) {
     await this.run(this.pythonPath, [...this.pythonArguments(), '--input', filePath, '--output', path.join(directory, 'transcript.json')], this.processOptions(signal));
     let transcript;
     try { transcript = JSON.parse(await readFile(path.join(directory, 'transcript.json'), 'utf8')); }
     catch { throw new AppError('Local transcription returned invalid data. Please retry.', 502, 'SUBTITLES_INVALID'); }
-    await writeFile(path.join(directory, 'captions.ass'), buildSubtitleAss(transcript, duration, {mapTime}), 'utf8');
+    if (shorts) transcript = {...transcript, ...SHORTS_DIMENSIONS};
+    await writeFile(path.join(directory, 'captions.ass'), buildSubtitleAss(transcript, duration, {mapTime, portraitSafeArea: shorts}), 'utf8');
   }
   async render({filePath, directory, duration, signal}) {
     await this.prepareCaptions({filePath, directory, duration, signal});

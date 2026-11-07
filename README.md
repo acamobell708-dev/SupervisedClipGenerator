@@ -7,7 +7,7 @@ Local React + Express app for finding and reviewing short moments in public YouT
 - **Node.js 20+** for the app.
 - **yt-dlp** on PATH for discovery and downloads.
 - **FFmpeg** on PATH for downloads, with libass and libx264 support for subtitles. This is a separate executable, not part of yt-dlp.
-- **Python 3.10–3.12 recommended** for local subtitles only.
+- **Python 3.10–3.12 recommended** for local subtitles and tape slowdown. Shorts layout alone only needs FFmpeg.
 
 On Windows, install [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) and [FFmpeg](https://ffmpeg.org/download.html), then reopen your terminal. From this folder:
 
@@ -28,6 +28,7 @@ For development, use `npm run dev`; restart after server changes. `RUN_WINDOWS.c
 3. Use the card's download icon for an MP4, or approve cards and choose **Batch upload (download ZIP)** to save them together. That button currently downloads; it does not publish.
 4. **Add white subtitles** applies to both download modes. Captions are burned into the exported video; the YouTube preview shows the original.
 5. **Tape slowdown**, below subtitles, gradually lowers video/audio speed from 100% to 60% and pitch by the same ratio (about −8.8 semitones at the end). It applies to individual/batch exports, with captions retimed to match. A 10-second source becomes about 12.77 seconds. The YouTube preview remains unchanged.
+6. **Shorts 9:16** exports a 720 × 1280 portrait MP4: the full sharp picture is centred over an enlarged, blurred and darkened background. It works with both download modes and can combine with subtitles and tape slowdown. Captions use portrait sizing and wider safe margins; all effects share one final video render. The YouTube preview still shows the original. A 1080 × 1920 option and rendered preview are not implemented.
 
 **Cancel download** stops processing. **Export timestamps** saves approved windows as JSON, not media. Approvals are temporary until exported. Demo media downloads are disabled.
 
@@ -53,7 +54,7 @@ Local transcription uses **faster-whisper, Whisper model weights, CTranslate2, P
 Tape slowdown reuses **NumPy and PyAV** from subtitle setup for local variable-rate audio resampling. **ffprobe** reads the actual clip duration; FFmpeg warps video timestamps and encodes H.264/AAC. No new package, GPU or API key is needed on an already configured machine. Run `npm run setup:subtitles` on a fresh machine even if using tape slowdown without captions.
 
 - Replay heatmaps may be unavailable; scores represent relative replay intensity, not view counts. Comments come from a bounded sample.
-- Downloads require accessible MP4/audio formats, source windows up to 15 seconds, resolution up to 720p and final files up to 50 MB. Tape slowdown increases duration by about 27.7%. Batches prepare clips sequentially and save a ZIP only when every clip succeeds.
+- Downloads require accessible MP4/audio formats, source windows up to 15 seconds, source resolution up to 720p and final files up to 50 MB. Shorts output is 720 × 1280 H.264/AAC; tape slowdown increases duration by about 27.7%. Batches prepare clips sequentially and save a ZIP only when every clip succeeds.
 - Transcription can make mistakes. Review exported captions; manual correction and rendered in-app preview are not implemented.
 - Only download footage you have permission to use. No cloud transcription or uploading occurs.
 

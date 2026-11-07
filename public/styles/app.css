@@ -13,10 +13,9 @@ h1,h2,h3{font-family:'Space Grotesk','DM Sans',sans-serif}
 .app-shell{min-height:100vh;display:flex;flex-direction:column}
 .topbar{border-bottom:1px solid #242837;background:#0e111ac9}
 .topbar-inner{max-width:1320px;margin:auto;height:48px;padding:0 24px;display:flex;justify-content:space-between;align-items:center}
-.brand{display:flex;align-items:center;gap:8px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;letter-spacing:-1px}
-.brand-icon{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#aaa3ff,#7160e8);display:grid;place-items:center}
-.brand-icon span{font-size:12px;color:#fff}
-.brand-accent{color:#a59bff}
+.brand{display:block;position:relative;width:300px;max-width:65%;aspect-ratio:1500/230;overflow:hidden;flex-shrink:0}
+/* Display the wordmark area of the supplied PNG without its large outer margins. */
+.brand-logo{position:absolute;display:block;width:calc(100% * 1672 / 1500);height:auto;max-width:none;left:calc(-100% * 112 / 1500);top:calc(-100% * 350 / 230)}
 .topbar-right{display:flex;align-items:center;gap:8px;color:#9ba2b7;font-size:11px;font-weight:600}
 .server-dot{width:6px;height:6px;background:#75d9ae;border-radius:99px;display:inline-block}
 .topbar-separator{height:12px;width:1px;background:#333849;margin:0 4px}
@@ -128,11 +127,12 @@ h1,h2,h3{font-family:'Space Grotesk','DM Sans',sans-serif}
 .player-footer a{font-size:11px;color:#b9b0fa;white-space:nowrap}
 .embed-alert{color:#e0b48a;font-size:12px;line-height:1.6;margin-top:8px}
 .test-download{margin-top:10px}
-.subtitle-toggle{display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:700;cursor:pointer}
-.subtitle-toggle input{accent-color:#b5a8ff;width:16px;height:16px;margin:1px 0 0;flex-shrink:0}
-.subtitle-toggle small{display:block;font-size:10px;font-weight:400;color:#a3acc0;margin-top:3px;line-height:1.5}
-.subtitle-note{font-size:10px;color:#a3acc0;line-height:1.5;margin-top:6px}
-.tape-toggle{margin-top:12px}
+.export-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.export-option{display:flex;align-items:center;gap:6px;min-width:0;min-height:36px;padding:7px;border:1px solid #34364a;border-radius:7px;background:#171b28;font-size:11px;font-weight:600;line-height:1.35;cursor:pointer}
+.export-option input{accent-color:#b5a8ff;width:14px;height:14px;margin:0;flex-shrink:0}
+.export-option span{overflow-wrap:anywhere}
+.export-option:has(input:checked){border-color:#7569b3;background:#26223a}
+.export-option:has(input:disabled){opacity:.55;cursor:not-allowed}
 .download-cancel{margin-top:7px}
 .download-message{font-size:12px;line-height:1.5;color:#c8bfff;margin-top:7px;overflow-wrap:anywhere}
 .download-message--error{color:#ffbabb}
@@ -175,7 +175,6 @@ h1,h2,h3{font-family:'Space Grotesk','DM Sans',sans-serif}
 }
 @media(max-width:480px){
   .topbar-separator,.version{display:none}
-  .brand{font-size:18px}
   .topbar-right{font-size:10px}
   .hero-heading p{font-size:12px}
   .search-form{flex-direction:column}

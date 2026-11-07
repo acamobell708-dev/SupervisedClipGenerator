@@ -10,13 +10,14 @@ function safeText(text) {
   return String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\\/g, '＼').replace(/{/g, '｛').replace(/}/g, '｝').trim();
 }
 
-export function buildSubtitleAss(transcript, duration, {mapTime = seconds => seconds} = {}) {
+export function buildSubtitleAss(transcript, duration, {mapTime = seconds => seconds, portraitSafeArea = false} = {}) {
   const width = Number(transcript.width), height = Number(transcript.height);
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 8192 || height > 8192 || !Array.isArray(transcript.words)) {
     throw new AppError('The local transcript is invalid. Please retry.', 502, 'SUBTITLES_INVALID');
   }
   const fontSize = Math.max(14, Math.round(height * 0.055));
-  const maxCharacters = Math.max(12, Math.min(42, Math.floor(width * 0.84 / (fontSize * 0.6))));
+  const horizontalMarginRatio = portraitSafeArea ? 0.12 : 0.08;
+  const maxCharacters = Math.max(12, Math.min(42, Math.floor(width * (1 - horizontalMarginRatio * 2) / (fontSize * 0.6))));
   const cues = [];
   let words = [], start = 0, end = 0;
   const flush = () => { if (words.length) cues.push({start, end, text: words.join(' ')}); words = []; };
@@ -34,7 +35,7 @@ export function buildSubtitleAss(transcript, duration, {mapTime = seconds => sec
   }
   flush();
   if (!cues.length) throw new AppError('No speech was detected. Turn off white subtitles to download the original clip.', 422, 'SUBTITLES_NO_SPEECH');
-  const margin = Math.round(width * 0.08), bottom = Math.round(height * 0.07);
+  const margin = Math.round(width * horizontalMarginRatio), bottom = Math.round(height * (portraitSafeArea ? 0.16 : 0.07));
   return `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${width}

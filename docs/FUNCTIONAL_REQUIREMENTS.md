@@ -1,6 +1,6 @@
 # SupervisedClipGenerator — functional requirements and roadmap
 
-Updated 2026-11-06. This document distinguishes implemented behaviour from planned behaviour; an item on this list is not evidence that it works.
+Updated 2026-11-07. This document distinguishes implemented behaviour from planned behaviour; an item on this list is not evidence that it works.
 
 ## Product goal
 
@@ -25,6 +25,7 @@ Given a public YouTube video (eventually a creator/channel), identify promising 
 | FR-027 | Batch action for approved clips | **Implemented:** Batch upload (download ZIP) button below preview currently downloads approved replay/comment clips sequentially into one ZIP with a selection manifest, progress and cancellation. No publishing. Approvals are captured on click; failure/cancellation stops the batch without saving a partial ZIP. |
 | FR-016 | Bold white subtitles | **Implemented:** optional local faster-whisper CPU transcription with word timestamps, short phrase grouping and bold white outlined ASS captions burned into individual/batch MP4s with FFmpeg. One-time model setup, offline inference, transcript caching, cancellation and explicit failure states. Manual correction and rendered in-app preview remain planned. |
 | FR-019 | Progressive tape slowdown | **Implemented:** checkbox below subtitles applies the same normalised 100%→60% video/audio speed ramp to individual and approved-batch exports, with pitch following speed (about −8.8 semitones at the end). Local NumPy/PyAV audio resampling, matching FFmpeg video time warp and remapped captions maintain sync. Source windows remain max 15 seconds; final duration increases by about 27.7%. |
+| FR-028 | Shorts portrait export | **Implemented:** third export checkbox produces 720×1280 9:16 MP4s with the complete sharp source fitted over a cropped, blurred and darkened background. Individual/batch exports, portrait-sized safe-area captions, and tape slowdown share one final H.264/AAC render. Settings and output dimensions are included in the ZIP manifest. |
 
 ## Phase 2 — selection, editing, ownership, upload (NOT implemented)
 
@@ -34,7 +35,7 @@ Given a public YouTube video (eventually a creator/channel), identify promising 
 | FR-013 | Manually choose timestamped start/end windows | Adjustable 5–15 seconds, keyboard scrubbing, confirmation, saved edits. |
 | FR-014 | Persist projects and approvals | SQLite or JSON store with video ID, sources, evidence, clips, status, timestamps, versioning. |
 | FR-015 | Full media editing pipeline | Individual test MP4 downloads implemented in FR-026; batch rendering and edits on owned/licensed/authorised footage remain planned. |
-| FR-017 | Auto editing and editing templates | Scene layout/presets, reframing 9:16, transitions, intro/outro, captions, watermarks and export preview. |
+| FR-017 | Auto editing and editing templates | Basic 9:16 blurred-fit layout implemented in FR-028; subject tracking/crop controls, transitions, intro/outro, watermarks and rendered export preview remain planned. |
 | FR-018 | Face overlay / nodding reaction | User-supplied or licensed face/video assets; opt-in and privacy/likeness rights. |
 | FR-020 | Borders and visual effects | Non-destructive template parameters; render-quality tests. |
 | FR-021 | Show all final clips for approval | Preview *rendered* final media before export or posting; distinguish preview from actual video file. |

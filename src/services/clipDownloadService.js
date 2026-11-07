@@ -20,8 +20,12 @@ export function validateClipDownload(input) {
   if (input.tapeSlowdown !== undefined && typeof input.tapeSlowdown !== 'boolean') {
     throw new AppError('tapeSlowdown must be true or false.', 400, 'INVALID_TAPE_OPTION');
   }
+  if (input.shorts !== undefined && typeof input.shorts !== 'boolean') {
+    throw new AppError('shorts must be true or false.', 400, 'INVALID_SHORTS_OPTION');
+  }
   return { videoId, startSeconds, endSeconds, ...(input.subtitles === undefined ? {} : {subtitles: input.subtitles}),
-    ...(input.tapeSlowdown === undefined ? {} : {tapeSlowdown: input.tapeSlowdown}) };
+    ...(input.tapeSlowdown === undefined ? {} : {tapeSlowdown: input.tapeSlowdown}),
+    ...(input.shorts === undefined ? {} : {shorts: input.shorts}) };
 }
 
 // No shell or user-controlled process arguments. Stop FFmpeg children as well as yt-dlp.
@@ -80,13 +84,14 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
 }
 
 export class ClipDownloadService {
-  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, tapeService, run = runExportProcess, tempRoot = tmpdir() } = {}) {
+  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, tapeService, shortsService, run = runExportProcess, tempRoot = tmpdir() } = {}) {
     this.binary = binary;
     // yt-dlp expects --ffmpeg-location to be an existing path, not a PATH command.
     this.ffmpegPath = /^ffmpeg(?:\.exe)?$/i.test(ffmpegPath) ? ffmpegPath : path.resolve(ffmpegPath);
     this.run = run;
     this.subtitleService = subtitleService;
     this.tapeService = tapeService;
+    this.shortsService = shortsService;
     this.tempRoot = tempRoot;
     this.busy = false;
   }
@@ -100,9 +105,10 @@ export class ClipDownloadService {
   }
 
   async prepare(input, { signal } = {}) {
-    const { videoId, startSeconds, endSeconds, subtitles = false, tapeSlowdown = false } = validateClipDownload(input);
+    const { videoId, startSeconds, endSeconds, subtitles = false, tapeSlowdown = false, shorts = false } = validateClipDownload(input);
     if (subtitles && !this.subtitleService) throw new AppError('Local subtitles need setup. Run npm run setup:subtitles, then restart the app.', 503, 'SUBTITLES_SETUP_REQUIRED');
     if (tapeSlowdown && !this.tapeService) throw new AppError('Tape slowdown is unavailable. Restart the app or turn the effect off.', 503, 'TAPE_UNAVAILABLE');
+    if (shorts && !tapeSlowdown && !this.shortsService) throw new AppError('Shorts layout is unavailable. Restart the app or turn Shorts 9:16 off.', 503, 'SHORTS_UNAVAILABLE');
     if (this.busy) throw new AppError('Another test clip is being prepared. Please wait and retry.', 409, 'DOWNLOAD_BUSY');
     this.busy = true;
     let directory;
@@ -130,19 +136,22 @@ export class ClipDownloadService {
       }
       if (tapeSlowdown) {
         const plan = await this.tapeService.plan({directory, signal});
-        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: plan.duration, mapTime: plan.mapTime, signal});
-        filePath = await this.tapeService.render({directory, plan, subtitles, signal});
+        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: plan.duration, mapTime: plan.mapTime, shorts, signal});
+        filePath = await this.tapeService.render({directory, plan, subtitles, shorts, signal});
+      } else if (shorts) {
+        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: endSeconds - startSeconds, shorts: true, signal});
+        filePath = await this.shortsService.render({directory, subtitles, signal});
       } else if (subtitles) {
         filePath = await this.subtitleService.render({filePath, directory, duration: endSeconds - startSeconds, signal});
       }
-      if (subtitles || tapeSlowdown) {
+      if (subtitles || tapeSlowdown || shorts) {
         file = await stat(filePath).catch(() => null);
         if (!file?.isFile() || file.size === 0) throw new AppError('No processed clip was produced. Please retry.', 502, 'RENDER_EMPTY');
         if (file.size > 50 * 1024 * 1024) throw new AppError('The processed clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
       }
       return {
         filePath,
-        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}.mp4`,
+        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}${shorts ? '-shorts' : ''}.mp4`,
         cleanup: () => this.removeTemporaryDirectory(directory),
       };
     } catch (error) {

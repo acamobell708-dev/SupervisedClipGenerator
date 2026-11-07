@@ -115,7 +115,35 @@ test('batch snapshots the tape setting, applies it to each approved source, and 
   const files = readStoredZip(await archive.arrayBuffer());
   assert.equal(calls, 2);
   assert.equal(files.get('02-timestamp-comment-45-55-subtitled-tape.mp4').text, 'tape with captions');
-  assert.deepEqual(JSON.parse(files.get('selections.json').text).renderOptions, {subtitles: true, tapeSlowdown: true});
+  assert.deepEqual(JSON.parse(files.get('selections.json').text).renderOptions, {subtitles: true, tapeSlowdown: true, shorts: false});
+});
+
+test('individual requests send Shorts independently or combined with the other effects', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.shorts, true);
+    return new Response(new Blob(['portrait MP4']));
+  });
+  await fetchClipBlob(result.video.id, getReviewClips(result)[0], undefined, {shorts: true});
+  await fetchClipBlob(result.video.id, getReviewClips(result)[0], undefined, {shorts: true, subtitles: true, tapeSlowdown: true});
+});
+
+test('Shorts batch applies every effect consistently and records portrait output dimensions', async () => {
+  const cards = getReviewClips(result);
+  let count = 0;
+  const archive = await prepareApprovedDownload({result, approved: new Set([cards[0].id, cards[2].id]), subtitles: true, tapeSlowdown: true, shorts: true,
+    fetchClip: async (_id, _clip, _signal, options) => {
+      assert.deepEqual(options, {subtitles: true, tapeSlowdown: true, shorts: true});
+      count++;
+      return new Blob(['portrait captioned tape MP4']);
+    },
+  });
+  assert.equal(count, 2);
+  const files = readStoredZip(await archive.arrayBuffer());
+  assert.equal(files.get('02-timestamp-comment-45-55-subtitled-tape-shorts.mp4').text, 'portrait captioned tape MP4');
+  const manifest = JSON.parse(files.get('selections.json').text);
+  assert.deepEqual(manifest.renderOptions, {subtitles: true, tapeSlowdown: true, shorts: true});
+  assert.deepEqual(manifest.outputFormat, {width: 720, height: 1280, layout: 'fit-blurred-background'});
 });
 
 test('empty approval selection makes no download requests', async () => {

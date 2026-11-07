@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTapeTimeline } from '../domain/tapeSlowdown.js';
+import { buildVideoFilterGraph } from '../domain/shortsLayout.js';
 import { AppError } from '../utils/AppError.js';
 import { runExportProcess } from './clipDownloadService.js';
 
@@ -43,12 +44,11 @@ export class TapeSlowdownService {
     const duration = Number(video.duration) > 0 ? Number(video.duration) : Number(metadata.format?.duration);
     return {...createTapeTimeline(duration), hasAudio: metadata.streams.some(stream => stream.codec_type === 'audio')};
   }
-  async render({directory, plan, subtitles = false, signal}) {
+  async render({directory, plan, subtitles = false, shorts = false, signal}) {
     if (plan.hasAudio) await this.run(this.pythonPath, [path.join(root, 'scripts/tape_slowdown.py'),
       '--input', path.join(directory, 'clip.mp4'), '--output', path.join(directory, 'tape-audio.wav'),
       '--duration', String(plan.duration)], this.processOptions(signal));
-    const video = `${plan.videoFilter}${subtitles ? ',ass=captions.ass' : ''}`;
-    const filter = `[0:v:0]${video}[video]`;
+    const filter = buildVideoFilterGraph({beforeLayout: plan.videoFilter, shorts, subtitles});
     await this.run(this.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', 'clip.mp4',
       ...(plan.hasAudio ? ['-i', 'tape-audio.wav'] : []),
       '-filter_complex', filter, '-map', '[video]', ...(plan.hasAudio ? ['-map', '1:a:0', '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
