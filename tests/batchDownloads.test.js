@@ -92,6 +92,32 @@ test('individual subtitle request includes the option in the API body', async t 
   assert.ok((await fetchClipBlob(result.video.id, getReviewClips(result)[0], undefined, {subtitles: true})).size);
 });
 
+test('individual requests pass tape slowdown independently of subtitles', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.tapeSlowdown, true);
+    assert.equal(body.subtitles, undefined);
+    return new Response(new Blob(['tape MP4']));
+  });
+  await fetchClipBlob(result.video.id, getReviewClips(result)[0], undefined, {tapeSlowdown: true});
+});
+
+test('batch snapshots the tape setting, applies it to each approved source, and records it', async () => {
+  const cards = getReviewClips(result);
+  let calls = 0;
+  const archive = await prepareApprovedDownload({result, approved: new Set([cards[0].id, cards[2].id]), tapeSlowdown: true, subtitles: true,
+    fetchClip: async (_id, _clip, _signal, options) => {
+      assert.deepEqual(options, {subtitles: true, tapeSlowdown: true});
+      calls++;
+      return new Blob(['tape with captions']);
+    },
+  });
+  const files = readStoredZip(await archive.arrayBuffer());
+  assert.equal(calls, 2);
+  assert.equal(files.get('02-timestamp-comment-45-55-subtitled-tape.mp4').text, 'tape with captions');
+  assert.deepEqual(JSON.parse(files.get('selections.json').text).renderOptions, {subtitles: true, tapeSlowdown: true});
+});
+
 test('empty approval selection makes no download requests', async () => {
   await assert.rejects(prepareApprovedDownload({result, approved: new Set(), fetchClip: () => assert.fail('Unexpected download')}), /Approve at least one/);
 });

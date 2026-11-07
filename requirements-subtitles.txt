@@ -1,1 +1,4 @@
 faster-whisper>=1.2.1,<2
+# Also used directly by the local tape-speed resampler.
+numpy>=1.23,<3
+av>=11

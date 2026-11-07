@@ -24,6 +24,7 @@ Given a public YouTube video (eventually a creator/channel), identify promising 
 | FR-026 | Download a selected clip for testing | **Implemented:** Download action on replay/comment cards and button below preview save an MP4 up to 720p using yt-dlp and FFmpeg; exact selected timestamps, max 15 seconds, cancellation/error states, isolated temporary files and cleanup. Disabled for synthetic demo. |
 | FR-027 | Batch action for approved clips | **Implemented:** Batch upload (download ZIP) button below preview currently downloads approved replay/comment clips sequentially into one ZIP with a selection manifest, progress and cancellation. No publishing. Approvals are captured on click; failure/cancellation stops the batch without saving a partial ZIP. |
 | FR-016 | Bold white subtitles | **Implemented:** optional local faster-whisper CPU transcription with word timestamps, short phrase grouping and bold white outlined ASS captions burned into individual/batch MP4s with FFmpeg. One-time model setup, offline inference, transcript caching, cancellation and explicit failure states. Manual correction and rendered in-app preview remain planned. |
+| FR-019 | Progressive tape slowdown | **Implemented:** checkbox below subtitles applies the same normalised 100%→60% video/audio speed ramp to individual and approved-batch exports, with pitch following speed (about −8.8 semitones at the end). Local NumPy/PyAV audio resampling, matching FFmpeg video time warp and remapped captions maintain sync. Source windows remain max 15 seconds; final duration increases by about 27.7%. |
 
 ## Phase 2 — selection, editing, ownership, upload (NOT implemented)
 
@@ -35,7 +36,6 @@ Given a public YouTube video (eventually a creator/channel), identify promising 
 | FR-015 | Full media editing pipeline | Individual test MP4 downloads implemented in FR-026; batch rendering and edits on owned/licensed/authorised footage remain planned. |
 | FR-017 | Auto editing and editing templates | Scene layout/presets, reframing 9:16, transitions, intro/outro, captions, watermarks and export preview. |
 | FR-018 | Face overlay / nodding reaction | User-supplied or licensed face/video assets; opt-in and privacy/likeness rights. |
-| FR-019 | Pitch ramp | Optional pitch changer starting high and gradually lowering/slowing/deepening; separate time-stretch and pitch controls to manage intelligibility. |
 | FR-020 | Borders and visual effects | Non-destructive template parameters; render-quality tests. |
 | FR-021 | Show all final clips for approval | Preview *rendered* final media before export or posting; distinguish preview from actual video file. |
 | FR-022 | Batch upload to destination channel | YouTube Data API **videos.insert** with destination-user OAuth and consent, upload status, quota handling, retries and deduplication. Do not reuse source ownership/auth. |

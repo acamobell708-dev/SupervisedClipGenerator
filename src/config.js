@@ -10,6 +10,7 @@ export const config = Object.freeze({
   port: integerEnv(process.env.PORT, 3000, 1, 65535),
   ytDlpPath: process.env.YT_DLP_PATH?.trim() || 'yt-dlp',
   ffmpegPath: process.env.FFMPEG_PATH?.trim() || 'ffmpeg',
+  ffprobePath: process.env.FFPROBE_PATH?.trim() ? path.resolve(process.env.FFPROBE_PATH.trim()) : undefined,
   subtitlePythonPath: process.env.SUBTITLE_PYTHON_PATH?.trim() ? path.resolve(process.env.SUBTITLE_PYTHON_PATH.trim()) : undefined,
   whisperModel: process.env.WHISPER_MODEL?.trim() || 'base',
   whisperLanguage: process.env.WHISPER_LANGUAGE?.trim() || 'auto',

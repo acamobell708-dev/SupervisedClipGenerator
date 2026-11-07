@@ -132,6 +132,7 @@ h1,h2,h3{font-family:'Space Grotesk','DM Sans',sans-serif}
 .subtitle-toggle input{accent-color:#b5a8ff;width:16px;height:16px;margin:1px 0 0;flex-shrink:0}
 .subtitle-toggle small{display:block;font-size:10px;font-weight:400;color:#a3acc0;margin-top:3px;line-height:1.5}
 .subtitle-note{font-size:10px;color:#a3acc0;line-height:1.5;margin-top:6px}
+.tape-toggle{margin-top:12px}
 .download-cancel{margin-top:7px}
 .download-message{font-size:12px;line-height:1.5;color:#c8bfff;margin-top:7px;overflow-wrap:anywhere}
 .download-message--error{color:#ffbabb}

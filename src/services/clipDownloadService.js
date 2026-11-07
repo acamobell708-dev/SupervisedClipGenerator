@@ -17,19 +17,24 @@ export function validateClipDownload(input) {
   if (input.subtitles !== undefined && typeof input.subtitles !== 'boolean') {
     throw new AppError('subtitles must be true or false.', 400, 'INVALID_SUBTITLE_OPTION');
   }
-  return { videoId, startSeconds, endSeconds, ...(input.subtitles === undefined ? {} : {subtitles: input.subtitles}) };
+  if (input.tapeSlowdown !== undefined && typeof input.tapeSlowdown !== 'boolean') {
+    throw new AppError('tapeSlowdown must be true or false.', 400, 'INVALID_TAPE_OPTION');
+  }
+  return { videoId, startSeconds, endSeconds, ...(input.subtitles === undefined ? {} : {subtitles: input.subtitles}),
+    ...(input.tapeSlowdown === undefined ? {} : {tapeSlowdown: input.tapeSlowdown}) };
 }
 
 // No shell or user-controlled process arguments. Stop FFmpeg children as well as yt-dlp.
-export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_000, missingMessage, timeoutMessage, errorForExit } = {}) {
+export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_000, missingMessage, timeoutMessage, errorForExit, captureStdout = false } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new AppError('Download cancelled.', 499, 'DOWNLOAD_CANCELLED'));
     const child = spawn(binary, args, {
       cwd, shell: false, windowsHide: true, detached: process.platform !== 'win32',
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', captureStdout ? 'pipe' : 'ignore', 'pipe'],
     });
     let stoppedError;
     let stderr = '';
+    let stdout = '';
     const stop = error => {
       if (stoppedError) return;
       stoppedError = error;
@@ -49,6 +54,10 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
     const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
+    child.stdout?.on('data', chunk => {
+      stdout += chunk.toString();
+      if (Buffer.byteLength(stdout) > 128 * 1024) stop(new AppError('Media inspection output was too large.', 502, 'MEDIA_OUTPUT_LIMIT'));
+    });
     child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-4000); });
     child.once('error', error => {
       cleanup();
@@ -59,7 +68,7 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
     child.once('close', code => {
       cleanup();
       if (stoppedError) return reject(stoppedError);
-      if (code === 0) return resolve();
+      if (code === 0) return resolve(captureStdout ? stdout : undefined);
       if (errorForExit) return reject(errorForExit(stderr));
       const missingFfmpeg = /ffmpeg.*(not found|not installed|could not find)/i.test(stderr);
       reject(new AppError(missingFfmpeg
@@ -71,12 +80,13 @@ export function runExportProcess(binary, args, { cwd, signal, timeoutMs = 180_00
 }
 
 export class ClipDownloadService {
-  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, run = runExportProcess, tempRoot = tmpdir() } = {}) {
+  constructor({ binary = 'yt-dlp', ffmpegPath = 'ffmpeg', subtitleService, tapeService, run = runExportProcess, tempRoot = tmpdir() } = {}) {
     this.binary = binary;
     // yt-dlp expects --ffmpeg-location to be an existing path, not a PATH command.
     this.ffmpegPath = /^ffmpeg(?:\.exe)?$/i.test(ffmpegPath) ? ffmpegPath : path.resolve(ffmpegPath);
     this.run = run;
     this.subtitleService = subtitleService;
+    this.tapeService = tapeService;
     this.tempRoot = tempRoot;
     this.busy = false;
   }
@@ -90,13 +100,15 @@ export class ClipDownloadService {
   }
 
   async prepare(input, { signal } = {}) {
-    const { videoId, startSeconds, endSeconds, subtitles = false } = validateClipDownload(input);
+    const { videoId, startSeconds, endSeconds, subtitles = false, tapeSlowdown = false } = validateClipDownload(input);
     if (subtitles && !this.subtitleService) throw new AppError('Local subtitles need setup. Run npm run setup:subtitles, then restart the app.', 503, 'SUBTITLES_SETUP_REQUIRED');
+    if (tapeSlowdown && !this.tapeService) throw new AppError('Tape slowdown is unavailable. Restart the app or turn the effect off.', 503, 'TAPE_UNAVAILABLE');
     if (this.busy) throw new AppError('Another test clip is being prepared. Please wait and retry.', 409, 'DOWNLOAD_BUSY');
     this.busy = true;
     let directory;
     try {
       if (subtitles) await this.subtitleService.check({signal});
+      if (tapeSlowdown) await this.tapeService.check({signal});
       await this.run(this.ffmpegPath, ['-version'], { signal, timeoutMs: 10_000 });
       directory = await mkdtemp(path.join(this.tempRoot, 'clipfoundry-'));
       await this.run(this.binary, [
@@ -116,15 +128,21 @@ export class ClipDownloadService {
       if (file.size > 50 * 1024 * 1024) {
         throw new AppError('The test clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
       }
-      if (subtitles) {
+      if (tapeSlowdown) {
+        const plan = await this.tapeService.plan({directory, signal});
+        if (subtitles) await this.subtitleService.prepareCaptions({filePath, directory, duration: plan.duration, mapTime: plan.mapTime, signal});
+        filePath = await this.tapeService.render({directory, plan, subtitles, signal});
+      } else if (subtitles) {
         filePath = await this.subtitleService.render({filePath, directory, duration: endSeconds - startSeconds, signal});
+      }
+      if (subtitles || tapeSlowdown) {
         file = await stat(filePath).catch(() => null);
-        if (!file?.isFile() || file.size === 0) throw new AppError('No captioned clip was produced. Please retry.', 502, 'SUBTITLES_EMPTY');
-        if (file.size > 50 * 1024 * 1024) throw new AppError('The captioned clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
+        if (!file?.isFile() || file.size === 0) throw new AppError('No processed clip was produced. Please retry.', 502, 'RENDER_EMPTY');
+        if (file.size > 50 * 1024 * 1024) throw new AppError('The processed clip exceeds the 50 MB download limit.', 413, 'CLIP_TOO_LARGE');
       }
       return {
         filePath,
-        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}.mp4`,
+        filename: `test-clip-${videoId}-${startSeconds}-${endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}.mp4`,
         cleanup: () => this.removeTemporaryDirectory(directory),
       };
     } catch (error) {

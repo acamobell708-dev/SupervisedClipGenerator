@@ -33,12 +33,15 @@ export class LocalSubtitleService {
   async check({signal} = {}) {
     await this.run(this.pythonPath, [...this.pythonArguments(), '--check'], {...this.processOptions(signal), timeoutMs: 30_000});
   }
-  async render({filePath, directory, duration, signal}) {
+  async prepareCaptions({filePath, directory, duration, mapTime, signal}) {
     await this.run(this.pythonPath, [...this.pythonArguments(), '--input', filePath, '--output', path.join(directory, 'transcript.json')], this.processOptions(signal));
     let transcript;
     try { transcript = JSON.parse(await readFile(path.join(directory, 'transcript.json'), 'utf8')); }
     catch { throw new AppError('Local transcription returned invalid data. Please retry.', 502, 'SUBTITLES_INVALID'); }
-    await writeFile(path.join(directory, 'captions.ass'), buildSubtitleAss(transcript, duration), 'utf8');
+    await writeFile(path.join(directory, 'captions.ass'), buildSubtitleAss(transcript, duration, {mapTime}), 'utf8');
+  }
+  async render({filePath, directory, duration, signal}) {
+    await this.prepareCaptions({filePath, directory, duration, signal});
     await this.run(this.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', 'clip.mp4',
       '-vf', 'ass=captions.ass', '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
       '-c:a', 'copy', '-movflags', '+faststart', 'clip-captioned.mp4'], {

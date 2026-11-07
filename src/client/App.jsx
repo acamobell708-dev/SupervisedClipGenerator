@@ -40,6 +40,7 @@ export function App() {
   const [selected, setSelected] = useState(null);
   const [approved, setApproved] = useState(new Set());
   const [subtitles, setSubtitles] = useState(true);
+  const [tapeSlowdown, setTapeSlowdown] = useState(false);
   const [download, setDownload] = useState({busy: false, message: '', error: false});
   const downloadController = useRef(null);
   useEffect(() => () => downloadController.current?.abort(), []);
@@ -51,10 +52,10 @@ export function App() {
     const range = `${formatTime(selection.startSeconds)}–${formatTime(selection.endSeconds)}`;
     const controller = new AbortController();
     downloadController.current = controller;
-    setDownload({busy: true, message: `Preparing ${range}${subtitles ? ' with local white subtitles' : ' as MP4'}…`, error: false});
+    setDownload({busy: true, message: `Preparing ${range}${subtitles ? ' with local white subtitles' : ' as MP4'}${tapeSlowdown ? ' and tape slowdown' : ''}…`, error: false});
     try {
-      const blob = await fetchClipBlob(selection.videoId, clip, controller.signal, {subtitles});
-      saveDownload(blob, `test-clip-${selection.videoId}-${selection.startSeconds}-${selection.endSeconds}${subtitles ? '-subtitled' : ''}.mp4`);
+      const blob = await fetchClipBlob(selection.videoId, clip, controller.signal, {subtitles, tapeSlowdown});
+      saveDownload(blob, `test-clip-${selection.videoId}-${selection.startSeconds}-${selection.endSeconds}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}.mp4`);
       setDownload({busy: false, message: `${range} is ready. Check your browser downloads.`, error: false});
     } catch (err) {
       const cancelled = err.name === 'AbortError';
@@ -72,12 +73,12 @@ export function App() {
     const count = getReviewClips(result).filter(clip => batchApprovals.has(clip.id)).length;
     setDownload({busy: true, mode: 'batch', message: `Preparing ${count} approved clips…`, error: false});
     try {
-      const archive = await prepareApprovedDownload({result, approved: batchApprovals, signal: controller.signal, subtitles,
+      const archive = await prepareApprovedDownload({result, approved: batchApprovals, signal: controller.signal, subtitles, tapeSlowdown,
         onProgress: ({index, total, clip, packing}) => setDownload({busy: true, mode: 'batch', error: false,
-          message: packing ? 'Packing approved clips into a ZIP…' : `Preparing clip ${index} of ${total}: ${formatTime(clip.startSeconds)}–${formatTime(clip.endSeconds)}${subtitles ? ' with local subtitles' : ''}…`,
+          message: packing ? 'Packing approved clips into a ZIP…' : `Preparing clip ${index} of ${total}: ${formatTime(clip.startSeconds)}–${formatTime(clip.endSeconds)}${subtitles ? ' with local subtitles' : ''}${tapeSlowdown ? ' and tape slowdown' : ''}…`,
         }),
       });
-      saveDownload(archive, `approved-clips-${result.video.id}${subtitles ? '-subtitled' : ''}.zip`);
+      saveDownload(archive, `approved-clips-${result.video.id}${subtitles ? '-subtitled' : ''}${tapeSlowdown ? '-tape' : ''}.zip`);
       setDownload({busy: false, message: `${count} approved clips are ready in one ZIP. Check your browser downloads.`, error: false});
     } catch (err) {
       const cancelled = err.name === 'AbortError';
@@ -172,6 +173,7 @@ export function App() {
             <div className="test-download">
               <label className="subtitle-toggle"><input type="checkbox" checked={subtitles} disabled={download.busy} onChange={event => setSubtitles(event.target.checked)}/><span>Add white subtitles <small>Local speech recognition · Applies to individual and batch downloads</small></span></label>
               <p className="subtitle-note">Subtitles are burned into downloaded videos. The YouTube preview shows the original.</p>
+              <label className="subtitle-toggle tape-toggle"><input type="checkbox" checked={tapeSlowdown} disabled={download.busy} onChange={event => setTapeSlowdown(event.target.checked)}/><span>Tape slowdown <small>Gradually slows video and audio to 60% speed, with a matching pitch drop</small></span></label>
               <div className="batch-download-actions"><button type="button" className="primary-button" onClick={downloadApproved} disabled={!approved.size || loading || download.busy || result.status === 'demo'}>{download.busy && download.mode === 'batch' ? <><span className="spinner"/> Preparing batch…</> : <>Batch upload (download ZIP) · {approved.size} approved ↓</>}</button><p>Current action: download all approved clips as one ZIP.</p></div>
               {download.busy && <button type="button" className="demo-link download-cancel" onClick={() => downloadController.current?.abort()}>Cancel download</button>}
               {download.message && <p className={download.error ? 'download-message download-message--error' : 'download-message'} role={download.error ? 'alert' : 'status'}>{download.message}</p>}

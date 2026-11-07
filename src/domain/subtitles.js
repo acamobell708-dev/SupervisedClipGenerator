@@ -10,7 +10,7 @@ function safeText(text) {
   return String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\\/g, '＼').replace(/{/g, '｛').replace(/}/g, '｝').trim();
 }
 
-export function buildSubtitleAss(transcript, duration) {
+export function buildSubtitleAss(transcript, duration, {mapTime = seconds => seconds} = {}) {
   const width = Number(transcript.width), height = Number(transcript.height);
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 8192 || height > 8192 || !Array.isArray(transcript.words)) {
     throw new AppError('The local transcript is invalid. Please retry.', 502, 'SUBTITLES_INVALID');
@@ -48,6 +48,6 @@ Style: Default,Arial,${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-${cues.map(cue => `Dialogue: 0,${assTime(cue.start)},${assTime(cue.end)},Default,,0,0,0,,${cue.text}`).join('\n')}
+${cues.map(cue => `Dialogue: 0,${assTime(mapTime(cue.start))},${assTime(mapTime(cue.end))},Default,,0,0,0,,${cue.text}`).join('\n')}
 `;
 }
